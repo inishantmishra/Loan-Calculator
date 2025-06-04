@@ -1,226 +1,272 @@
 <template>
-  <div class="space-y-8">
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+  <div class="container">
+    <h1 class="text-2xl font-bold mb-4">Full Disbursement Loan Calculator</h1>
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
       <div>
-        <label class="block font-semibold text-sky-700">Loan Amount</label>
-        <input v-model.number="loanAmount" type="number" class="w-full p-2 border rounded shadow-sm" />
+        <label class="label">Loan Amount</label>
+        <input v-model.number="loanAmount" class="input" type="number" />
       </div>
       <div>
-        <label class="block font-semibold text-sky-700">Interest Rate (% annual)</label>
-        <input v-model.number="interestRate" type="number" class="w-full p-2 border rounded shadow-sm" />
+        <label class="label">Loan Term (Months)</label>
+        <input v-model.number="loanTerm" class="input" type="number" />
       </div>
       <div>
-        <label class="block font-semibold text-sky-700">Loan Term (months)</label>
-        <input v-model.number="loanTerm" type="number" class="w-full p-2 border rounded shadow-sm" />
-      </div>
-      <div>
-        <label class="block font-semibold text-sky-700">Monthly Extra Payment</label>
-        <input v-model.number="monthlyExtra" type="number" class="w-full p-2 border rounded shadow-sm" />
+        <label class="label">Interest Rate (%)</label>
+        <input v-model.number="interestRate" class="input" type="number" step="0.01" />
       </div>
     </div>
 
-    <div>
-      <h3 class="font-bold text-xl text-sky-700">Recurring Lump Sum</h3>
-      <input v-model.number="recurringLump.amount" placeholder="Amount" type="number" class="p-2 border rounded shadow-sm w-1/3" />
-      <input v-model.number="recurringLump.every" placeholder="Every X months" type="number" class="p-2 border rounded shadow-sm w-1/3" />
+    <div class="mt-4">
+      <label class="label">Monthly Extra Payment</label>
+      <input v-model.number="monthlyExtra" class="input" type="number" />
     </div>
 
-    <div>
-      <h3 class="font-bold text-xl text-sky-700">One-time Lump Sum Payments</h3>
-      <div v-for="(lump, index) in oneTimeLumps" :key="index" class="flex gap-2 mb-2">
-        <input v-model.number="lump.month" placeholder="Month" type="number" class="p-2 border rounded shadow-sm w-1/3" />
-        <input v-model.number="lump.amount" placeholder="Amount" type="number" class="p-2 border rounded shadow-sm w-1/3" />
-        <button @click="oneTimeLumps.splice(index, 1)" class="text-red-600">Remove</button>
+    <div class="mt-4">
+      <label class="label">Lump Sum Payments</label>
+      <div class="grid grid-cols-2 gap-4" v-for="(lump, index) in lumpSums" :key="index">
+        <input v-model.number="lump.month" class="input" type="number" placeholder="Month" />
+        <input v-model.number="lump.amount" class="input" type="number" placeholder="Amount" />
       </div>
-      <button @click="oneTimeLumps.push({ month: null, amount: null })" class="bg-sky-600 text-white px-4 py-2 rounded">Add Lump Sum</button>
+      <button class="button" @click="addLumpSum">Add Lump Sum</button>
     </div>
 
-    <button @click="calculate" class="bg-green-600 text-white p-3 rounded shadow">Calculate Plan</button>
+    <button class="button mt-4" @click="calculatePlan">Calculate Plan</button>
 
-    <div v-if="summary" class="mt-8">
-      <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div class="bg-white border rounded-lg p-4 shadow text-center">
-          <h4 class="font-semibold text-gray-500 text-sm">Monthly EMI</h4>
-          <p class="text-xl font-bold text-sky-700">₹{{ summary.emi.toFixed(2) }}</p>
-        </div>
-        <div class="bg-white border rounded-lg p-4 shadow text-center">
-          <h4 class="font-semibold text-gray-500 text-sm">Total Interest</h4>
-          <p class="text-xl font-bold text-sky-700">₹{{ summary.totalInterest.toFixed(2) }}</p>
-        </div>
-        <div class="bg-white border rounded-lg p-4 shadow text-center">
-          <h4 class="font-semibold text-gray-500 text-sm">Duration</h4>
-          <p class="text-xl font-bold text-sky-700">{{ schedule.length }} months</p>
-        </div>
-        <div class="bg-white border rounded-lg p-4 shadow text-center">
-          <h4 class="font-semibold text-gray-500 text-sm">Months Saved</h4>
-          <p class="text-xl font-bold text-sky-700">{{ summary.monthsSaved }}</p>
-        </div>
+    <div v-if="summary" class="summary-box">
+      <div class="summary-item">Monthly EMI: ₹{{ summary.emi.toFixed(2) }}</div>
+      <div class="summary-item">Total Interest: ₹{{ summary.totalInterest.toFixed(2) }}</div>
+      <div class="summary-item">Loan Duration: {{ summary.duration }} months</div>
+      <div class="summary-item">Months Saved: {{ summary.monthsSaved }}</div>
+    </div>
+
+    <div class="chart-wrapper">
+      <div class="chart-container">
+        <canvas id="barChart"></canvas>
       </div>
-
-      <canvas id="barChart" class="mt-10"></canvas>
-      <canvas id="lineChart" class="mt-10"></canvas>
-
-      <h3 class="font-bold text-xl mt-8 text-sky-700">Amortization Schedule</h3>
-      <table class="w-full mt-4 table-auto border">
-        <thead>
-          <tr>
-            <th class="border px-2 py-1">Month</th>
-            <th class="border px-2 py-1">AMI</th>
-            <th class="border px-2 py-1">Principal</th>
-            <th class="border px-2 py-1">Interest</th>
-            <th class="border px-2 py-1">Extra</th>
-            <th class="border px-2 py-1">Lump Sum</th>
-            <th class="border px-2 py-1">Balance</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="row in schedule" :key="row.month">
-            <td class="border px-2 py-1">{{ row.month }}</td>
-            <td class="border px-2 py-1">₹{{ row.ami.toFixed(2) }}</td>
-            <td class="border px-2 py-1">₹{{ row.principal.toFixed(2) }}</td>
-            <td class="border px-2 py-1">₹{{ row.interest.toFixed(2) }}</td>
-            <td class="border px-2 py-1">₹{{ row.extra.toFixed(2) }}</td>
-            <td class="border px-2 py-1">₹{{ row.lump.toFixed(2) }}</td>
-            <td class="border px-2 py-1">₹{{ row.balance.toFixed(2) }}</td>
-          </tr>
-        </tbody>
-      </table>
+      <div class="chart-container">
+        <canvas id="lineChart"></canvas>
+      </div>
     </div>
+
+    <div class="mt-4">
+      <button class="button" @click="downloadCSV">Download CSV</button>
+    </div>
+
+    <table class="table mt-6">
+      <thead>
+        <tr>
+          <th>Month</th>
+          <th>EMI</th>
+          <th>Principal</th>
+          <th>Interest</th>
+          <th>Extra</th>
+          <th>Lump Sum</th>
+          <th>Balance</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr v-for="(item, idx) in schedule" :key="idx">
+          <td>{{ item.month }}</td>
+          <td>{{ item.emi.toFixed(2) }}</td>
+          <td>{{ item.principal.toFixed(2) }}</td>
+          <td>{{ item.interest.toFixed(2) }}</td>
+          <td>{{ item.extra.toFixed(2) }}</td>
+          <td>{{ item.lump.toFixed(2) }}</td>
+          <td>{{ item.balance.toFixed(2) }}</td>
+        </tr>
+      </tbody>
+    </table>
   </div>
 </template>
 
-<script>
+<script setup>
+import { ref, watch } from 'vue';
 import Chart from 'chart.js/auto';
 
-export default {
-  data() {
-    return {
-      loanAmount: 1000000,
-      interestRate: 8,
-      loanTerm: 240,
-      monthlyExtra: 0,
-      recurringLump: { amount: 0, every: 0 },
-      oneTimeLumps: [],
-      schedule: [],
-      summary: null,
-      barChart: null,
-      lineChart: null
-    };
-  },
-  methods: {
-    calculate() {
-      const r = this.interestRate / 12 / 100;
-      const emi = (this.loanAmount * r * Math.pow(1 + r, this.loanTerm)) / (Math.pow(1 + r, this.loanTerm) - 1);
+const loanAmount = ref(1000000);
+const loanTerm = ref(240);
+const interestRate = ref(8.5);
+const monthlyExtra = ref(0);
+const lumpSums = ref([{ month: 12, amount: 50000 }]);
+const schedule = ref([]);
+const summary = ref(null);
+let barChart = null;
+let lineChart = null;
 
-      let balance = this.loanAmount;
-      const lumpMap = Object.fromEntries(this.oneTimeLumps.map(e => [e.month, e.amount]));
-      const schedule = [];
-      let month = 1;
-      let totalInterest = 0;
+function addLumpSum() {
+  lumpSums.value.push({ month: 0, amount: 0 });
+}
 
-      while (balance > 0 && month <= 1000) {
-        const interest = balance * r;
-        let principal = emi - interest;
-        let extra = this.monthlyExtra;
-        let lump = 0;
+function calculateEMI(P, N, R) {
+  const r = R / 12 / 100;
+  return P * r * Math.pow(1 + r, N) / (Math.pow(1 + r, N) - 1);
+}
 
-        if (this.recurringLump.every && month % this.recurringLump.every === 0) {
-          lump += this.recurringLump.amount;
-        }
+function calculatePlan() {
+  let balance = loanAmount.value;
+  const emi = calculateEMI(balance, loanTerm.value, interestRate.value);
+  const result = [];
+  let totalInterest = 0;
+  let month = 1;
 
-        if (lumpMap[month]) {
-          lump += lumpMap[month];
-        }
+  while (balance > 0.1 && month <= 1000) {
+    const r = interestRate.value / 12 / 100;
+    const interest = balance * r;
+    let principal = emi - interest;
+    const extra = monthlyExtra.value;
+    let lump = 0;
 
-        let totalPay = principal + extra + lump;
-        if (totalPay > balance) {
-          principal = balance;
-          extra = 0;
-          lump = 0;
-        }
+    lumpSums.value.forEach(ls => {
+      if (ls.month === month) lump += ls.amount;
+    });
 
-        schedule.push({
-          month,
-          ami: emi,
-          principal,
-          interest,
-          extra,
-          lump,
-          balance: balance - (principal + extra + lump)
-        });
-
-        balance -= (principal + extra + lump);
-        totalInterest += interest;
-        month++;
-      }
-
-      this.schedule = schedule;
-      this.summary = {
-        emi,
-        totalInterest,
-        monthsSaved: this.loanTerm - schedule.length
-      };
-
-      this.$nextTick(this.renderCharts);
-    },
-    renderCharts() {
-      if (this.barChart) this.barChart.destroy();
-      if (this.lineChart) this.lineChart.destroy();
-
-      const labels = this.schedule.map(r => `M${r.month}`);
-      const data = this.schedule;
-
-      this.barChart = new Chart(document.getElementById('barChart'), {
-        type: 'bar',
-        data: {
-          labels,
-          datasets: [
-            { label: 'Principal', data: data.map(r => r.principal), backgroundColor: '#38bdf8', stack: 'stack' },
-            { label: 'Interest', data: data.map(r => r.interest), backgroundColor: '#7dd3fc', stack: 'stack' },
-            { label: 'Extra', data: data.map(r => r.extra), backgroundColor: '#bae6fd', stack: 'stack' },
-            { label: 'Lump Sum', data: data.map(r => r.lump), backgroundColor: '#e0f2fe', stack: 'stack' }
-          ]
-        },
-        options: {
-          plugins: { legend: { position: 'top' } },
-          responsive: true,
-          scales: { x: { stacked: true }, y: { stacked: true } }
-        }
-      });
-
-      this.lineChart = new Chart(document.getElementById('lineChart'), {
-        type: 'line',
-        data: {
-          labels,
-          datasets: [
-            {
-              label: 'Outstanding Balance',
-              data: data.map(r => r.balance),
-              borderColor: '#0ea5e9',
-              backgroundColor: '#0ea5e9',
-              fill: false
-            }
-          ]
-        },
-        options: {
-          plugins: { legend: { position: 'top' } },
-          responsive: true,
-          scales: {
-            x: { title: { display: true, text: 'Month' } },
-            y: { title: { display: true, text: 'Balance (₹)' } }
-          }
-        }
-      });
+    if (principal + extra + lump > balance) {
+      principal = balance;
     }
+
+    const totalPayment = principal + extra + lump;
+    balance -= totalPayment;
+    totalInterest += interest;
+
+    result.push({
+      month,
+      emi,
+      principal,
+      interest,
+      extra,
+      lump,
+      balance: balance > 0 ? balance : 0,
+    });
+    month++;
   }
-};
+
+  schedule.value = result;
+  summary.value = {
+    emi,
+    totalInterest,
+    duration: result.length,
+    monthsSaved: loanTerm.value - result.length
+  };
+
+  renderCharts(result);
+}
+
+function renderCharts(data) {
+  const ctx1 = document.getElementById('barChart');
+  const ctx2 = document.getElementById('lineChart');
+  const labels = data.map(d => `M${d.month}`);
+
+  const principal = data.map(d => d.principal);
+  const interest = data.map(d => d.interest);
+  const extra = data.map(d => d.extra);
+  const lump = data.map(d => d.lump);
+  const balance = data.map(d => d.balance);
+
+  if (barChart) barChart.destroy();
+  if (lineChart) lineChart.destroy();
+
+  barChart = new Chart(ctx1, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Principal', data: principal, backgroundColor: '#60a5fa' },
+        { label: 'Interest', data: interest, backgroundColor: '#fcd34d' },
+        { label: 'Extra', data: extra, backgroundColor: '#86efac' },
+        { label: 'Lump Sum', data: lump, backgroundColor: '#f87171' },
+      ]
+    },
+    options: { responsive: true, stacked: true }
+  });
+
+  lineChart = new Chart(ctx2, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{ label: 'Outstanding Balance', data: balance, borderColor: '#7c3aed' }]
+    },
+    options: { responsive: true }
+  });
+}
+
+function downloadCSV() {
+  let csv = 'Month,EMI,Principal,Interest,Extra,Lump Sum,Balance\n';
+  schedule.value.forEach(r => {
+    csv += `${r.month},${r.emi.toFixed(2)},${r.principal.toFixed(2)},${r.interest.toFixed(2)},${r.extra.toFixed(2)},${r.lump.toFixed(2)},${r.balance.toFixed(2)}\n`;
+  });
+
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'amortization_schedule.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
 </script>
 
 <style scoped>
-canvas {
-  background-color: #fff;
+.container {
+  max-width: 900px;
+  margin: auto;
+  padding: 2rem;
+  background-color: #f9fafb;
+  border-radius: 1rem;
+  box-shadow: 0 0 10px rgba(0,0,0,0.05);
+}
+.label {
+  font-weight: 600;
+  display: block;
+  margin-bottom: 0.25rem;
+}
+.input {
+  width: 100%;
+  padding: 0.5rem;
   border-radius: 0.5rem;
+  border: 1px solid #d1d5db;
+  background-color: white;
+}
+.button {
+  background-color: #3b82f6;
+  color: white;
+  padding: 0.5rem 1rem;
+  border-radius: 0.5rem;
+  font-weight: 600;
+}
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+.table th, .table td {
+  border: 1px solid #e5e7eb;
+  padding: 0.5rem;
+  text-align: center;
+}
+.summary-box {
+  background-color: #e0f2fe;
   padding: 1rem;
-  box-shadow: 0 0 10px rgba(0, 0, 0, 0.05);
+  border-radius: 0.75rem;
+  margin-top: 1rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+}
+.summary-item {
+  font-weight: 600;
+  font-size: 1rem;
+}
+.chart-wrapper {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+  margin-top: 2rem;
+}
+.chart-container {
+  background-color: white;
+  padding: 1rem;
+  border-radius: 0.75rem;
+  box-shadow: 0 0 5px rgba(0,0,0,0.05);
 }
 </style>
