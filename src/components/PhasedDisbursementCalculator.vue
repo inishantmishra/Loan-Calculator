@@ -11,9 +11,13 @@
         <label class="label">Loan Term (Months)</label>
         <input v-model.number="loanTerm" class="input" type="number" />
       </div>
-      <div class="col-span-2">
+      <div>
         <label class="label">Interest Rate (%)</label>
         <input v-model.number="interestRate" class="input" type="number" step="0.01" />
+      </div>
+      <div>
+        <label class="label">Comfortable Minimum EMI Per Month</label>
+        <input v-model.number="comfortableEmi" class="input" type="number" />
       </div>
     </div>
 
@@ -33,10 +37,14 @@
 
     <div class="mt-4">
       <label class="label">Lump Sum Payments (Recurring or One-Time)</label>
-      <div class="grid grid-cols-3 gap-4" v-for="(lump, index) in lumpSums" :key="index">
-        <input v-model.number="lump.month" class="input" type="number" placeholder="Month" />
+      <div class="grid grid-cols-4 gap-4" v-for="(lump, index) in lumpSums" :key="index">
+        <input v-model.number="lump.month" class="input" type="number" placeholder="Start Month" />
         <input v-model.number="lump.amount" class="input" type="number" placeholder="Amount" />
-        <input v-model.number="lump.repeat" class="input" type="number" placeholder="Repeat every N months (0 for once)" />
+        <select v-model="lump.recurring" class="input">
+          <option :value="false">One-Time</option>
+          <option :value="true">Recurring</option>
+        </select>
+        <input v-if="lump.recurring" v-model.number="lump.repeat" class="input" type="number" placeholder="Repeat Every N Months" />
       </div>
       <button class="button mt-2" @click="addLumpSum">Add Lump Sum</button>
     </div>
@@ -99,169 +107,173 @@
   </div>
 </template>
 
-
 <script setup>
-import { ref } from 'vue';
-import Chart from 'chart.js/auto';
+import { ref } from 'vue'
+import Chart from 'chart.js/auto'
 
-const approvedLoanAmount = ref(0);
-const loanTerm = ref(240);
-const interestRate = ref(8);
-const disbursements = ref([{ month: 1, percent: 35 }]);
-const monthlyExtra = ref(0);
-const lumpSums = ref([]);
+const approvedLoanAmount = ref(1000000)
+const loanTerm = ref(240)
+const interestRate = ref(8.5)
+const comfortableEmi = ref(50000)
+const monthlyExtra = ref(0)
 
-const phaseSummaries = ref([]);
-const summary = ref(null);
-const schedule = ref([]);
+const disbursements = ref([{ month: 1, percent: 35 }])
+const lumpSums = ref([])
+const phaseSummaries = ref([])
+const schedule = ref([])
+const summary = ref(null)
 
-function addDisbursement() {
-  disbursements.value.push({ month: 1, percent: 0 });
+const addDisbursement = () => {
+  disbursements.value.push({ month: 1, percent: 0 })
 }
 
-function addLumpSum() {
-  lumpSums.value.push({ month: 1, amount: 0, repeat: 0 });
+const addLumpSum = () => {
+  lumpSums.value.push({ month: 1, amount: 0, recurring: false, repeat: 0 })
 }
 
-function calculatePlan() {
-  const phases = [...disbursements.value]
-    .sort((a, b) => a.month - b.month)
-    .map(p => ({ ...p, amount: (approvedLoanAmount.value * p.percent) / 100 }));
+const calculateEMI = (principal, rate, months) => {
+  const monthlyRate = rate / 1200
+  return principal * monthlyRate / (1 - Math.pow(1 + monthlyRate, -months))
+}
 
-  let principal = 0;
-  let balance = 0;
-  let emi = 0;
-  let emiStartMonth = 1;
-  let currentPhase = 0;
-  let totalInterest = 0;
-  let results = [];
-  phaseSummaries.value = [];
+const calculatePlan = () => {
+  schedule.value = []
+  phaseSummaries.value = []
+  let balance = 0
+  let totalInterest = 0
+  let month = 1
+  let currentEMI = 0
+  let disbursed = 0
+  let emiMap = new Map()
+  let totalLoan = approvedLoanAmount.value
+  let disbursedPhases = [...disbursements.value].sort((a, b) => a.month - b.month)
 
-  for (let month = 1; month <= loanTerm.value; month++) {
-    const disbursement = phases.find(p => p.month === month);
-    if (disbursement) {
-      principal += disbursement.amount;
-      balance += disbursement.amount;
-      emi = calculateEMI(principal, interestRate.value, loanTerm.value - month + 1);
-      emiStartMonth = month;
-      phaseSummaries.value.push({ ...disbursement, emi, amount: disbursement.amount });
+  const emiMapGenerator = () => {
+    for (const phase of disbursedPhases) {
+      let phaseAmount = totalLoan * phase.percent / 100
+      disbursed += phaseAmount
+      currentEMI = calculateEMI(disbursed, interestRate.value, loanTerm.value)
+      emiMap.set(phase.month, { emi: currentEMI, disbursed: disbursed })
+      phaseSummaries.value.push({
+        month: phase.month,
+        amount: disbursed,
+        emi: currentEMI
+      })
     }
-
-    let interest = balance * (interestRate.value / 1200);
-    let principalPart = emi - interest;
-    let extra = monthlyExtra.value;
-
-    let lumpSum = lumpSums.value
-      .filter(l => l.month === month || (l.repeat > 0 && (month - l.month) % l.repeat === 0 && month >= l.month))
-      .reduce((sum, l) => sum + l.amount, 0);
-
-    let totalPrincipalPayment = principalPart + extra + lumpSum;
-    balance = Math.max(0, balance - totalPrincipalPayment);
-
-    results.push({
-      month,
-      emi,
-      principal: principalPart,
-      interest,
-      extra,
-      lump: lumpSum,
-      balance
-    });
-
-    totalInterest += interest;
-    if (balance <= 0) break;
   }
 
-  schedule.value = results;
+  emiMapGenerator()
+
+  let currentBalance = 0
+  let monthlyEMI = 0
+  let currentPhaseIdx = 0
+
+  while (month <= loanTerm.value * 2 && currentBalance < totalLoan) {
+    if (emiMap.has(month)) {
+      monthlyEMI = emiMap.get(month).emi
+      currentBalance = emiMap.get(month).disbursed
+    }
+
+    const monthlyRate = interestRate.value / 1200
+    let interest = currentBalance * monthlyRate
+    let actualEMI = Math.max(monthlyEMI, comfortableEmi.value)
+
+    let lumpAmount = 0
+    for (const l of lumpSums.value) {
+      if (l.recurring && (month - l.month) % l.repeat === 0 && month >= l.month) {
+        lumpAmount += l.amount
+      } else if (!l.recurring && l.month === month) {
+        lumpAmount += l.amount
+      }
+    }
+
+    let extra = monthlyExtra.value
+    let totalPayment = actualEMI + extra + lumpAmount
+    let principal = totalPayment - interest
+    currentBalance = Math.max(0, currentBalance - principal)
+    totalInterest += interest
+
+    schedule.value.push({
+      month,
+      emi: actualEMI,
+      interest,
+      principal,
+      extra,
+      lump: lumpAmount,
+      balance: currentBalance
+    })
+
+    if (currentBalance <= 0) break
+    month++
+  }
+
+  const savedMonths = loanTerm.value - schedule.value.length
   summary.value = {
-    lastEmi: emi,
+    lastEmi: monthlyEMI,
     totalInterest,
-    duration: results.length,
-    monthsSaved: loanTerm.value - results.length
-  };
+    duration: schedule.value.length,
+    monthsSaved: savedMonths > 0 ? savedMonths : 0
+  }
 
-  renderCharts(results);
+  drawCharts()
 }
 
-function calculateEMI(principal, rate, months) {
-  const r = rate / 1200;
-  return principal * r * Math.pow(1 + r, months) / (Math.pow(1 + r, months) - 1);
-}
+const drawCharts = () => {
+  const barCtx = document.getElementById('barChart')
+  const lineCtx = document.getElementById('lineChart')
+  if (barCtx.chart) barCtx.chart.destroy()
+  if (lineCtx.chart) lineCtx.chart.destroy()
 
-function renderCharts(data) {
-  const ctxBar = document.getElementById('barChart');
-  const ctxLine = document.getElementById('lineChart');
+  const months = schedule.value.map(x => x.month)
+  const principal = schedule.value.map(x => x.principal)
+  const interest = schedule.value.map(x => x.interest)
+  const extra = schedule.value.map(x => x.extra)
+  const lump = schedule.value.map(x => x.lump)
+  const balances = schedule.value.map(x => x.balance)
 
-  if (window.barChart) window.barChart.destroy();
-  if (window.lineChart) window.lineChart.destroy();
-
-  const labels = data.map(d => `M${d.month}`);
-
-  window.barChart = new Chart(ctxBar, {
+  barCtx.chart = new Chart(barCtx, {
     type: 'bar',
     data: {
-      labels,
+      labels: months,
       datasets: [
-        { label: 'Principal', data: data.map(d => d.principal), backgroundColor: '#60a5fa' },
-        { label: 'Interest', data: data.map(d => d.interest), backgroundColor: '#facc15' },
-        { label: 'Extra', data: data.map(d => d.extra), backgroundColor: '#34d399' },
-        { label: 'Lump Sum', data: data.map(d => d.lump), backgroundColor: '#f472b6' },
+        { label: 'Principal', data: principal, backgroundColor: '#7FC8F8' },
+        { label: 'Interest', data: interest, backgroundColor: '#FFB6B9' },
+        { label: 'Extra', data: extra, backgroundColor: '#FFDAC1' },
+        { label: 'Lump Sum', data: lump, backgroundColor: '#E2F0CB' }
       ]
     },
-    options: {
-      responsive: true,
-      plugins: { legend: { position: 'bottom' } },
-      scales: { x: { stacked: true }, y: { stacked: true } }
-    }
-  });
+    options: { responsive: true, plugins: { legend: { position: 'top' } } }
+  })
 
-  window.lineChart = new Chart(ctxLine, {
+  lineCtx.chart = new Chart(lineCtx, {
     type: 'line',
     data: {
-      labels,
-      datasets: [
-        {
-          label: 'Outstanding Balance',
-          data: data.map(d => d.balance),
-          borderColor: '#818cf8',
-          backgroundColor: '#c7d2fe',
-          fill: true
-        }
-      ]
+      labels: months,
+      datasets: [{ label: 'Outstanding Balance', data: balances, borderColor: '#0369A1', borderWidth: 2 }]
     },
-    options: {
-      responsive: true,
-      plugins: { legend: { position: 'bottom' } }
-    }
-  });
+    options: { responsive: true, plugins: { legend: { position: 'top' } } }
+  })
 }
 
-function downloadCSV() {
-  const headers = ['Month', 'EMI', 'Principal', 'Interest', 'Extra', 'Lump Sum', 'Balance'];
-  const rows = schedule.value.map(row => [
-    row.month,
-    row.emi.toFixed(2),
-    row.principal.toFixed(2),
-    row.interest.toFixed(2),
-    row.extra.toFixed(2),
-    row.lump.toFixed(2),
-    row.balance.toFixed(2)
-  ]);
-  const csv = [headers, ...rows].map(r => r.join(',')).join('\n');
-
-  const blob = new Blob([csv], { type: 'text/csv' });
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob);
-  link.download = 'phased_schedule.csv';
-  link.click();
+const downloadCSV = () => {
+  const headers = ['Month', 'EMI', 'Principal', 'Interest', 'Extra', 'Lump Sum', 'Balance']
+  const rows = schedule.value.map(row => [row.month, row.emi, row.principal, row.interest, row.extra, row.lump, row.balance])
+  let csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n')
+  const encodedUri = encodeURI(csvContent)
+  const link = document.createElement('a')
+  link.setAttribute('href', encodedUri)
+  link.setAttribute('download', 'loan_schedule.csv')
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
 }
 </script>
 
 <style scoped>
 .container {
-  padding: 2rem;
-  background: #f8fafc;
-  color: #1f2937;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 20px;
 }
 .label {
   font-weight: 600;
@@ -269,50 +281,50 @@ function downloadCSV() {
   display: block;
 }
 .input {
-  padding: 0.5rem;
-  border-radius: 0.5rem;
   width: 100%;
-  border: 1px solid #d1d5db;
+  padding: 0.5rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.375rem;
 }
 .button {
-  background: #3b82f6;
+  background-color: #2563eb;
   color: white;
   padding: 0.5rem 1rem;
-  border-radius: 0.5rem;
+  border-radius: 0.375rem;
   font-weight: 600;
 }
 .summary-box {
-  margin-top: 1rem;
-  background: #e0f2fe;
-  padding: 1rem;
-  border-radius: 0.5rem;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 1rem;
+  display: flex;
+  flex-wrap: wrap;
+  margin-top: 20px;
+  gap: 20px;
 }
 .summary-item {
-  font-size: 0.95rem;
+  background: #f0f9ff;
+  padding: 10px 20px;
+  border-radius: 0.5rem;
+  box-shadow: 0 0 5px rgba(0,0,0,0.1);
 }
 .table {
   width: 100%;
   border-collapse: collapse;
 }
 .table th, .table td {
-  border: 1px solid #d1d5db;
   padding: 0.5rem;
+  border: 1px solid #e5e7eb;
   text-align: center;
 }
 .chart-wrapper {
-  margin-top: 2rem;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 2rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-top: 1rem;
 }
 .chart-container {
-  background: white;
+  flex: 1 1 45%;
+  background: #fff;
   padding: 1rem;
   border-radius: 0.5rem;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 0 5px rgba(0,0,0,0.05);
 }
 </style>
-
