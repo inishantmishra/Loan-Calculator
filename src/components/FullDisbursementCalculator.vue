@@ -1,100 +1,225 @@
-
 <template>
-  <div class="p-4 space-y-4">
+  <div class="container">
+    <h1 class="text-2xl font-bold mb-4">Full Disbursement Loan Calculator</h1>
+
     <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
       <div>
-        <label>Total Loan Amount</label>
-        <input v-model.number="loanAmount" type="number" class="input" />
+        <label class="label">Loan Amount</label>
+        <input v-model.number="loanAmount" class="input" type="number" />
       </div>
       <div>
-        <label>Interest Rate (%)</label>
-        <input v-model.number="interestRate" type="number" class="input" />
+        <label class="label">Loan Term (Months)</label>
+        <input v-model.number="loanTerm" class="input" type="number" />
       </div>
       <div>
-        <label>Loan Term (Months)</label>
-        <input v-model.number="loanTerm" type="number" class="input" />
+        <label class="label">Interest Rate (%)</label>
+        <input v-model.number="interestRate" class="input" type="number" step="0.01" />
       </div>
-      <div>
-        <label>Comfortable Minimum EMI</label>
-        <input v-model.number="comfortableEmi" type="number" class="input" />
-      </div>
-      <div>
-        <label>Monthly Extra Payment</label>
-        <input v-model.number="monthlyExtra" type="number" class="input" />
-      </div>
+    </div>
+    
+    <div>
+        <label class="label">Comfortable Minimum EMI Per Month</label>
+        <input v-model.number="comfortableEmi" class="input" type="number" />
+    </div>
+
+    <div class="mt-4">
+      <label class="label">Monthly Extra Payment</label>
+      <input v-model.number="monthlyExtra" class="input" type="number" />
+    </div>
+
       <div>
         <label>EMI Increase Rate per Year (%)</label>
         <input v-model.number="emiIncreaseRate" type="number" class="input" />
       </div>
+
+    <div class="mt-4">
+      <label class="label">Lump Sum Payments</label>
+      <div class="grid grid-cols-2 gap-4" v-for="(lump, index) in lumpSums" :key="index">
+        <input v-model.number="lump.month" class="input" type="number" placeholder="Month" />
+        <input v-model.number="lump.amount" class="input" type="number" placeholder="Amount" />
+      </div>
+      <button class="button" @click="addLumpSum">Add Lump Sum</button>
     </div>
 
-    <div>
-      <h2 class="font-bold mt-4">Lump Sum Payments</h2>
-      <button @click="addLumpSum" class="btn">Add Lump Sum</button>
-      <div v-for="(lump, index) in lumpSums" :key="index" class="grid grid-cols-4 gap-2 mt-2">
-        <input v-model.number="lump.month" type="number" placeholder="Month" class="input" />
-        <input v-model.number="lump.amount" type="number" placeholder="Amount" class="input" />
-        <label class="flex items-center space-x-2">
-          <input type="checkbox" v-model="lump.recurring" /> <span>Recurring</span>
-        </label>
-        <input v-if="lump.recurring" v-model.number="lump.repeat" type="number" placeholder="Every x months" class="input" />
+    <button class="button mt-4" @click="calculatePlan">Calculate Plan</button>
+
+    <div v-if="summary" class="summary-box">
+      <div class="summary-item">Monthly EMI: ₹{{ summary.emi.toFixed(2) }}</div>
+      <div class="summary-item">Total Interest: ₹{{ summary.totalInterest.toFixed(2) }}</div>
+      <div class="summary-item">Loan Duration: {{ summary.duration }} months</div>
+      <div class="summary-item">Months Saved: {{ summary.monthsSaved }}</div>
+    </div>
+
+    <div class="chart-wrapper">
+      <div class="chart-container">
+        <canvas id="barChart"></canvas>
+      </div>
+      <div class="chart-container">
+        <canvas id="lineChart"></canvas>
       </div>
     </div>
 
-    <button @click="calculatePlan" class="btn mt-4">Calculate Plan</button>
-
-    <div v-if="summary" class="mt-6 bg-blue-50 p-4 rounded shadow">
-      <h3 class="font-bold text-lg mb-2">Summary</h3>
-      <p>Monthly EMI: ₹{{ summary.emi.toFixed(2) }}</p>
-      <p>Total Interest: ₹{{ summary.totalInterest.toFixed(2) }}</p>
-      <p>Total Duration: {{ summary.duration }} months</p>
-      <p>Months Saved: {{ summary.monthsSaved }}</p>
+    <div class="mt-4">
+      <button class="button" @click="downloadCSV">Download CSV</button>
     </div>
 
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-      <canvas id="barChartFull"></canvas>
-      <canvas id="lineChartFull"></canvas>
-    </div>
-
-    <button @click="downloadCSV" class="btn mt-4">Download Schedule CSV</button>
+    <table class="table mt-6">
+      <thead>
+        <tr>
+          <th>Month</th>
+          <th>EMI</th>
+          <th>Principal</th>
+          <th>Interest</th>
+          <th>Extra</th>
+          <th>Lump Sum</th>
+          <th>Balance</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr v-for="(item, idx) in schedule" :key="idx">
+          <td>{{ item.month }}</td>
+          <td>{{ item.emi.toFixed(2) }}</td>
+          <td>{{ item.principal.toFixed(2) }}</td>
+          <td>{{ item.interest.toFixed(2) }}</td>
+          <td>{{ item.extra.toFixed(2) }}</td>
+          <td>{{ item.lump.toFixed(2) }}</td>
+          <td>{{ item.balance.toFixed(2) }}</td>
+        </tr>
+      </tbody>
+    </table>
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue';
-import { calculateFullSchedule, downloadCSVFile, renderCharts } from '../utils/fullLogic';
+import { ref, watch } from 'vue';
+import Chart from 'chart.js/auto';
 
-const loanAmount = ref(0);
-const interestRate = ref(0);
-const loanTerm = ref(0);
-const comfortableEmi = ref(0);
+const loanAmount = ref(1000000);
+const loanTerm = ref(240);
+const interestRate = ref(8.5);
 const monthlyExtra = ref(0);
-const emiIncreaseRate = ref(0);
-const lumpSums = ref([]);
+const comfortableEmi = ref(50000)
+const emiIncreaseRate = ref(0)
+const lumpSums = ref([{ month: 12, amount: 50000 }]);
+const schedule = ref([]);
 const summary = ref(null);
+let barChart = null;
+let lineChart = null;
 
 function addLumpSum() {
-  lumpSums.value.push({ month: 1, amount: 0, recurring: false, repeat: 3 });
+  lumpSums.value.push({ month: 0, amount: 0 });
+}
+
+function calculateEMI(P, N, R) {
+  const r = R / 12 / 100;
+  return P * r * Math.pow(1 + r, N) / (Math.pow(1 + r, N) - 1);
 }
 
 function calculatePlan() {
-  const result = calculateFullSchedule({
-    loanAmount: loanAmount.value,
-    interestRate: interestRate.value,
-    loanTerm: loanTerm.value,
-    comfortableEmi: comfortableEmi.value,
-    monthlyExtra: monthlyExtra.value,
-    emiIncreaseRate: emiIncreaseRate.value,
-    lumpSums: lumpSums.value,
+  let balance = loanAmount.value;
+  const emi = calculateEMI(balance, loanTerm.value, interestRate.value);
+  const result = [];
+  let totalInterest = 0;
+  let month = 1;
+
+ while (month <= loanTerm.value * 2 && balance > 0) {
+    const yearlyEMIBoost = Math.floor((month - 1) / 12) * (emiIncreaseRate.value / 100)
+    const r = interestRate.value / 12 / 100;
+    const interest = balance * r;
+
+    let effectiveEmi = Math.max(emi, comfortableEmi.value)
+    effectiveEmi *= (1 + yearlyEMIBoost)
+
+    let principal = effectiveEmi - interest;
+    const extra = monthlyExtra.value;
+    let lump = 0;
+
+    lumpSums.value.forEach(ls => {
+      if (ls.month === month) lump += ls.amount;
+    });
+
+    if (principal + extra + lump > balance) {
+      principal = balance;
+    }
+
+    const totalPayment = principal + extra + lump;
+    balance -= totalPayment;
+    totalInterest += interest;
+
+    result.push({
+      month,
+      emi,
+      principal,
+      interest,
+      extra,
+      lump,
+      balance: balance > 0 ? balance : 0,
+    });
+    month++;
+  }
+
+  schedule.value = result;
+  summary.value = {
+    emi,
+    totalInterest,
+    duration: result.length,
+    monthsSaved: loanTerm.value - result.length
+  };
+
+  renderCharts(result);
+}
+
+function renderCharts(data) {
+  const ctx1 = document.getElementById('barChart');
+  const ctx2 = document.getElementById('lineChart');
+  const labels = data.map(d => `M${d.month}`);
+
+  const principal = data.map(d => d.principal);
+  const interest = data.map(d => d.interest);
+  const extra = data.map(d => d.extra);
+  const lump = data.map(d => d.lump);
+  const balance = data.map(d => d.balance);
+
+  if (barChart) barChart.destroy();
+  if (lineChart) lineChart.destroy();
+
+  barChart = new Chart(ctx1, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Principal', data: principal, backgroundColor: '#60a5fa' },
+        { label: 'Interest', data: interest, backgroundColor: '#fcd34d' },
+        { label: 'Extra', data: extra, backgroundColor: '#86efac' },
+        { label: 'Lump Sum', data: lump, backgroundColor: '#f87171' },
+      ]
+    },
+    options: { responsive: true, stacked: true }
   });
 
-  summary.value = result.summary;
-  renderCharts(result.schedule, 'barChartFull', 'lineChartFull');
+  lineChart = new Chart(ctx2, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{ label: 'Outstanding Balance', data: balance, borderColor: '#7c3aed' }]
+    },
+    options: { responsive: true }
+  });
 }
 
 function downloadCSV() {
-  if (!summary.value) return;
-  downloadCSVFile(summary.value.schedule, 'full_schedule.csv');
+  let csv = 'Month,EMI,Principal,Interest,Extra,Lump Sum,Balance\n';
+  schedule.value.forEach(r => {
+    csv += `${r.month},${r.emi.toFixed(2)},${r.principal.toFixed(2)},${r.interest.toFixed(2)},${r.extra.toFixed(2)},${r.lump.toFixed(2)},${r.balance.toFixed(2)}\n`;
+  });
+
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'amortization_schedule.csv';
+  a.click();
+  URL.revokeObjectURL(url);
 }
 </script>
 
@@ -160,16 +285,5 @@ function downloadCSV() {
   padding: 1rem;
   border-radius: 0.75rem;
   box-shadow: 0 0 5px rgba(0,0,0,0.05);
-}
-.btn {
-  background-color: #2563eb;
-  color: white;
-  padding: 0.5rem 1rem;
-  border-radius: 0.375rem;
-  cursor: pointer;
-  transition: background-color 0.2s;
-}
-.btn:hover {
-  background-color: #1d4ed8;
 }
 </style>
