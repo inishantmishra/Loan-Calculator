@@ -1,210 +1,193 @@
 <template>
-  <div class="container">
-    <h1 class="text-2xl font-bold mb-4">Full Disbursement Loan Calculator</h1>
-
+  <div class="p-4 space-y-4">
     <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
       <div>
-        <label class="label">Loan Amount</label>
-        <input v-model.number="loanAmount" class="input" type="number" />
+        <label>Loan Amount</label>
+        <input v-model.number="loanAmount" type="number" class="input" />
       </div>
       <div>
-        <label class="label">Loan Term (Months)</label>
-        <input v-model.number="loanTerm" class="input" type="number" />
+        <label>Interest Rate (%)</label>
+        <input v-model.number="interestRate" type="number" class="input" step="0.01" />
       </div>
       <div>
-        <label class="label">Interest Rate (%)</label>
-        <input v-model.number="interestRate" class="input" type="number" step="0.01" />
+        <label>Loan Term (Months)</label>
+        <input v-model.number="loanTerm" type="number" class="input" />
+      </div>
+      <div>
+        <label>Comfortable Minimum EMI</label>
+        <input v-model.number="comfortableEmi" type="number" class="input" />
+      </div>
+      <div>
+        <label>Monthly Extra Payment</label>
+        <input v-model.number="monthlyExtra" type="number" class="input" />
+      </div>
+      <div>
+        <label>EMI Increase Rate per Year (%)</label>
+        <input v-model.number="emiIncreaseRate" type="number" class="input" />
       </div>
     </div>
 
-    <div class="mt-4">
-      <label class="label">Monthly Extra Payment</label>
-      <input v-model.number="monthlyExtra" class="input" type="number" />
-    </div>
-
-    <div class="mt-4">
-      <label class="label">Lump Sum Payments</label>
-      <div class="grid grid-cols-2 gap-4" v-for="(lump, index) in lumpSums" :key="index">
-        <input v-model.number="lump.month" class="input" type="number" placeholder="Month" />
-        <input v-model.number="lump.amount" class="input" type="number" placeholder="Amount" />
-      </div>
-      <button class="button" @click="addLumpSum">Add Lump Sum</button>
-    </div>
-
-    <button class="button mt-4" @click="calculatePlan">Calculate Plan</button>
-
-    <div v-if="summary" class="summary-box">
-      <div class="summary-item">Monthly EMI: ₹{{ summary.emi.toFixed(2) }}</div>
-      <div class="summary-item">Total Interest: ₹{{ summary.totalInterest.toFixed(2) }}</div>
-      <div class="summary-item">Loan Duration: {{ summary.duration }} months</div>
-      <div class="summary-item">Months Saved: {{ summary.monthsSaved }}</div>
-    </div>
-
-    <div class="chart-wrapper">
-      <div class="chart-container">
-        <canvas id="barChart"></canvas>
-      </div>
-      <div class="chart-container">
-        <canvas id="lineChart"></canvas>
+    <div>
+      <h2 class="font-bold mt-4">Lump Sum Payments</h2>
+      <button @click="addLumpSum" class="btn">Add Lump Sum</button>
+      <div v-for="(lump, index) in lumpSums" :key="index" class="grid grid-cols-4 gap-2 mt-2">
+        <input v-model.number="lump.month" type="number" placeholder="Month" class="input" />
+        <input v-model.number="lump.amount" type="number" placeholder="Amount" class="input" />
+        <label class="flex items-center space-x-2">
+          <input type="checkbox" v-model="lump.recurring" /> <span>Recurring</span>
+        </label>
+        <input v-if="lump.recurring" v-model.number="lump.repeat" type="number" placeholder="Every x months" class="input" />
       </div>
     </div>
 
-    <div class="mt-4">
-      <button class="button" @click="downloadCSV">Download CSV</button>
+    <button @click="calculatePlan" class="btn mt-4">Calculate Plan</button>
+
+    <div v-if="summary" class="mt-6 bg-blue-50 p-4 rounded shadow">
+      <h3 class="font-bold text-lg mb-2">Summary</h3>
+      <p>Monthly EMI: ₹{{ summary.lastEmi.toFixed(2) }}</p>
+      <p>Total Interest: ₹{{ summary.totalInterest.toFixed(2) }}</p>
+      <p>Total Duration: {{ summary.duration }} months</p>
+      <p>Months Saved: {{ summary.monthsSaved }}</p>
     </div>
 
-    <table class="table mt-6">
-      <thead>
-        <tr>
-          <th>Month</th>
-          <th>EMI</th>
-          <th>Principal</th>
-          <th>Interest</th>
-          <th>Extra</th>
-          <th>Lump Sum</th>
-          <th>Balance</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="(item, idx) in schedule" :key="idx">
-          <td>{{ item.month }}</td>
-          <td>{{ item.emi.toFixed(2) }}</td>
-          <td>{{ item.principal.toFixed(2) }}</td>
-          <td>{{ item.interest.toFixed(2) }}</td>
-          <td>{{ item.extra.toFixed(2) }}</td>
-          <td>{{ item.lump.toFixed(2) }}</td>
-          <td>{{ item.balance.toFixed(2) }}</td>
-        </tr>
-      </tbody>
-    </table>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+      <canvas id="barChartFull"></canvas>
+      <canvas id="lineChartFull"></canvas>
+    </div>
+
+    <button @click="downloadCSV" class="btn mt-4">Download Schedule CSV</button>
   </div>
 </template>
 
 <script setup>
-import { ref, watch } from 'vue';
-import Chart from 'chart.js/auto';
+import { ref } from 'vue'
+import Chart from 'chart.js/auto'
 
-const loanAmount = ref(1000000);
-const loanTerm = ref(240);
-const interestRate = ref(8.5);
-const monthlyExtra = ref(0);
-const lumpSums = ref([{ month: 12, amount: 50000 }]);
-const schedule = ref([]);
-const summary = ref(null);
-let barChart = null;
-let lineChart = null;
+const loanAmount = ref(1000000)
+const interestRate = ref(8.5)
+const loanTerm = ref(240)
+const monthlyExtra = ref(0)
+const comfortableEmi = ref(50000)
+const emiIncreaseRate = ref(0)
+const lumpSums = ref([])
+const schedule = ref([])
+const summary = ref(null)
 
-function addLumpSum() {
-  lumpSums.value.push({ month: 0, amount: 0 });
+const addLumpSum = () => {
+  lumpSums.value.push({ month: 1, amount: 0, recurring: false, repeat: 0 })
 }
 
-function calculateEMI(P, N, R) {
-  const r = R / 12 / 100;
-  return P * r * Math.pow(1 + r, N) / (Math.pow(1 + r, N) - 1);
+const calculateEMI = (principal, rate, months) => {
+  const monthlyRate = rate / 1200
+  return principal * monthlyRate / (1 - Math.pow(1 + monthlyRate, -months))
 }
 
-function calculatePlan() {
-  let balance = loanAmount.value;
-  const emi = calculateEMI(balance, loanTerm.value, interestRate.value);
-  const result = [];
-  let totalInterest = 0;
-  let month = 1;
+const calculatePlan = () => {
+  schedule.value = []
+  let balance = loanAmount.value
+  let totalInterest = 0
+  let month = 1
+  let monthlyEMI = calculateEMI(balance, interestRate.value, loanTerm.value)
 
-  while (balance > 0.1 && month <= 1000) {
-    const r = interestRate.value / 12 / 100;
-    const interest = balance * r;
-    let principal = emi - interest;
-    const extra = monthlyExtra.value;
-    let lump = 0;
+  while (month <= loanTerm.value * 2 && balance > 0) {
+    const yearlyEMIBoost = Math.floor((month - 1) / 12) * (emiIncreaseRate.value / 100)
+    const monthlyRate = interestRate.value / 1200
+    let interest = balance * monthlyRate
 
-    lumpSums.value.forEach(ls => {
-      if (ls.month === month) lump += ls.amount;
-    });
+    let effectiveEmi = Math.max(monthlyEMI, comfortableEmi.value)
+    effectiveEmi *= (1 + yearlyEMIBoost)
 
-    if (principal + extra + lump > balance) {
-      principal = balance;
+    let lumpAmount = 0
+    for (const l of lumpSums.value) {
+      if (l.recurring && (month - l.month) % l.repeat === 0 && month >= l.month) {
+        lumpAmount += l.amount
+      } else if (!l.recurring && l.month === month) {
+        lumpAmount += l.amount
+      }
     }
 
-    const totalPayment = principal + extra + lump;
-    balance -= totalPayment;
-    totalInterest += interest;
+    let extra = monthlyExtra.value
+    let totalPayment = effectiveEmi + extra + lumpAmount
+    let principal = totalPayment - interest
+    balance = Math.max(0, balance - principal)
+    totalInterest += interest
 
-    result.push({
+    schedule.value.push({
       month,
-      emi,
-      principal,
+      emi: effectiveEmi,
       interest,
+      principal,
       extra,
-      lump,
-      balance: balance > 0 ? balance : 0,
-    });
-    month++;
+      lump: lumpAmount,
+      balance
+    })
+
+    if (balance <= 0) break
+    month++
   }
 
-  schedule.value = result;
+  const savedMonths = loanTerm.value - schedule.value.length
   summary.value = {
-    emi,
+    lastEmi: monthlyEMI,
     totalInterest,
-    duration: result.length,
-    monthsSaved: loanTerm.value - result.length
-  };
+    duration: schedule.value.length,
+    monthsSaved: savedMonths > 0 ? savedMonths : 0
+  }
 
-  renderCharts(result);
+  drawCharts()
 }
 
-function renderCharts(data) {
-  const ctx1 = document.getElementById('barChart');
-  const ctx2 = document.getElementById('lineChart');
-  const labels = data.map(d => `M${d.month}`);
+const drawCharts = () => {
+  const barCtx = document.getElementById('barChartFull')
+  const lineCtx = document.getElementById('lineChartFull')
+  if (barCtx.chart) barCtx.chart.destroy()
+  if (lineCtx.chart) lineCtx.chart.destroy()
 
-  const principal = data.map(d => d.principal);
-  const interest = data.map(d => d.interest);
-  const extra = data.map(d => d.extra);
-  const lump = data.map(d => d.lump);
-  const balance = data.map(d => d.balance);
+  const months = schedule.value.map(x => x.month)
+  const principal = schedule.value.map(x => x.principal)
+  const interest = schedule.value.map(x => x.interest)
+  const extra = schedule.value.map(x => x.extra)
+  const lump = schedule.value.map(x => x.lump)
+  const balances = schedule.value.map(x => x.balance)
 
-  if (barChart) barChart.destroy();
-  if (lineChart) lineChart.destroy();
-
-  barChart = new Chart(ctx1, {
+  barCtx.chart = new Chart(barCtx, {
     type: 'bar',
     data: {
-      labels,
+      labels: months,
       datasets: [
-        { label: 'Principal', data: principal, backgroundColor: '#60a5fa' },
-        { label: 'Interest', data: interest, backgroundColor: '#fcd34d' },
-        { label: 'Extra', data: extra, backgroundColor: '#86efac' },
-        { label: 'Lump Sum', data: lump, backgroundColor: '#f87171' },
+        { label: 'Principal', data: principal, backgroundColor: '#7FC8F8' },
+        { label: 'Interest', data: interest, backgroundColor: '#FFB6B9' },
+        { label: 'Extra', data: extra, backgroundColor: '#FFDAC1' },
+        { label: 'Lump Sum', data: lump, backgroundColor: '#E2F0CB' }
       ]
     },
-    options: { responsive: true, stacked: true }
-  });
+    options: { responsive: true, plugins: { legend: { position: 'top' } } }
+  })
 
-  lineChart = new Chart(ctx2, {
+  lineCtx.chart = new Chart(lineCtx, {
     type: 'line',
     data: {
-      labels,
-      datasets: [{ label: 'Outstanding Balance', data: balance, borderColor: '#7c3aed' }]
+      labels: months,
+      datasets: [{ label: 'Outstanding Balance', data: balances, borderColor: '#0369A1', borderWidth: 2 }]
     },
-    options: { responsive: true }
-  });
+    options: { responsive: true, plugins: { legend: { position: 'top' } } }
+  })
 }
 
-function downloadCSV() {
-  let csv = 'Month,EMI,Principal,Interest,Extra,Lump Sum,Balance\n';
-  schedule.value.forEach(r => {
-    csv += `${r.month},${r.emi.toFixed(2)},${r.principal.toFixed(2)},${r.interest.toFixed(2)},${r.extra.toFixed(2)},${r.lump.toFixed(2)},${r.balance.toFixed(2)}\n`;
-  });
-
-  const blob = new Blob([csv], { type: 'text/csv' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'amortization_schedule.csv';
-  a.click();
-  URL.revokeObjectURL(url);
+const downloadCSV = () => {
+  const headers = ['Month', 'EMI', 'Principal', 'Interest', 'Extra', 'Lump Sum', 'Balance']
+  const rows = schedule.value.map(row => [row.month, row.emi, row.principal, row.interest, row.extra, row.lump, row.balance])
+  let csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n')
+  const encodedUri = encodeURI(csvContent)
+  const link = document.createElement('a')
+  link.setAttribute('href', encodedUri)
+  link.setAttribute('download', 'full_loan_schedule.csv')
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
 }
 </script>
+
 
 <style scoped>
 .container {
@@ -268,5 +251,16 @@ function downloadCSV() {
   padding: 1rem;
   border-radius: 0.75rem;
   box-shadow: 0 0 5px rgba(0,0,0,0.05);
+}
+.btn {
+  background-color: #2563eb;
+  color: white;
+  padding: 0.5rem 1rem;
+  border-radius: 0.375rem;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+.btn:hover {
+  background-color: #1d4ed8;
 }
 </style>

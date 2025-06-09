@@ -1,109 +1,75 @@
 <template>
-  <div class="container">
-    <h1 class="text-2xl font-bold mb-4">Phased Disbursement Calculator</h1>
-
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+  <div class="p-4 space-y-4">
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
       <div>
-        <label class="label">Approved Loan Amount</label>
-        <input v-model.number="approvedLoanAmount" class="input" type="number" />
+        <label>Approved Loan Amount</label>
+        <input v-model.number="approvedAmount" type="number" class="input" />
       </div>
       <div>
-        <label class="label">Loan Term (Months)</label>
-        <input v-model.number="loanTerm" class="input" type="number" />
+        <label>Interest Rate (%)</label>
+        <input v-model.number="interestRate" type="number" class="input" step="0.01" />
       </div>
       <div>
-        <label class="label">Interest Rate (%)</label>
-        <input v-model.number="interestRate" class="input" type="number" step="0.01" />
+        <label>Loan Term (Months)</label>
+        <input v-model.number="loanTerm" type="number" class="input" />
       </div>
       <div>
-        <label class="label">Comfortable Minimum EMI Per Month</label>
-        <input v-model.number="comfortableEmi" class="input" type="number" />
+        <label>Comfortable Minimum EMI</label>
+        <input v-model.number="comfortableEmi" type="number" class="input" />
+      </div>
+      <div>
+        <label>Monthly Extra Payment</label>
+        <input v-model.number="monthlyExtra" type="number" class="input" />
+      </div>
+      <div>
+        <label>EMI Increase Rate per Year (%)</label>
+        <input v-model.number="emiIncreaseRate" type="number" class="input" />
       </div>
     </div>
 
-    <div class="mt-4">
-      <h2 class="text-lg font-semibold">Disbursement Phases</h2>
-      <div class="grid grid-cols-2 gap-4" v-for="(phase, index) in disbursements" :key="index">
-        <input v-model.number="phase.month" class="input" type="number" placeholder="Disbursement Month" />
-        <input v-model.number="phase.percent" class="input" type="number" placeholder="% of Loan" />
-      </div>
-      <button class="button mt-2" @click="addDisbursement">Add Phase</button>
-    </div>
-
-    <div class="mt-4">
-      <label class="label">Monthly Extra Payment</label>
-      <input v-model.number="monthlyExtra" class="input" type="number" />
-    </div>
-
-    <div class="mt-4">
-      <label class="label">Lump Sum Payments (Recurring or One-Time)</label>
-      <div class="grid grid-cols-4 gap-4" v-for="(lump, index) in lumpSums" :key="index">
-        <input v-model.number="lump.month" class="input" type="number" placeholder="Start Month" />
-        <input v-model.number="lump.amount" class="input" type="number" placeholder="Amount" />
-        <select v-model="lump.recurring" class="input">
-          <option :value="false">One-Time</option>
-          <option :value="true">Recurring</option>
-        </select>
-        <input v-if="lump.recurring" v-model.number="lump.repeat" class="input" type="number" placeholder="Repeat Every N Months" />
-      </div>
-      <button class="button mt-2" @click="addLumpSum">Add Lump Sum</button>
-    </div>
-
-    <button class="button mt-4" @click="calculatePlan">Calculate Plan</button>
-
-    <div v-if="phaseSummaries.length" class="summary-box">
-      <div v-for="(phase, i) in phaseSummaries" :key="i" class="summary-item">
-        <p><strong>Phase {{ i + 1 }}</strong></p>
-        <p>Disbursed: ₹{{ phase.amount.toFixed(0) }}</p>
-        <p>Month: {{ phase.month }}</p>
-        <p>EMI: ₹{{ phase.emi.toFixed(2) }}</p>
+    <div>
+      <h2 class="font-bold mt-4">Disbursement Phases</h2>
+      <button @click="addDisbursement" class="btn">Add Phase</button>
+      <div v-for="(d, index) in disbursements" :key="index" class="grid grid-cols-2 gap-2 mt-2">
+        <input v-model.number="d.month" type="number" placeholder="Month" class="input" />
+        <input v-model.number="d.percent" type="number" placeholder="% of Loan" class="input" />
       </div>
     </div>
 
-    <div v-if="summary" class="summary-box">
-      <div class="summary-item">Final EMI: ₹{{ summary.lastEmi.toFixed(2) }}</div>
-      <div class="summary-item">Total Interest: ₹{{ summary.totalInterest.toFixed(2) }}</div>
-      <div class="summary-item">Loan Duration: {{ summary.duration }} months</div>
-      <div class="summary-item">Months Saved: {{ summary.monthsSaved }}</div>
-    </div>
-
-    <div class="chart-wrapper">
-      <div class="chart-container">
-        <canvas id="barChart"></canvas>
-      </div>
-      <div class="chart-container">
-        <canvas id="lineChart"></canvas>
+    <div>
+      <h2 class="font-bold mt-4">Lump Sum Payments</h2>
+      <button @click="addLumpSum" class="btn">Add Lump Sum</button>
+      <div v-for="(lump, index) in lumpSums" :key="index" class="grid grid-cols-4 gap-2 mt-2">
+        <input v-model.number="lump.month" type="number" placeholder="Month" class="input" />
+        <input v-model.number="lump.amount" type="number" placeholder="Amount" class="input" />
+        <label class="flex items-center space-x-2">
+          <input type="checkbox" v-model="lump.recurring" /> <span>Recurring</span>
+        </label>
+        <input v-if="lump.recurring" v-model.number="lump.repeat" type="number" placeholder="Every x months" class="input" />
       </div>
     </div>
 
-    <div class="mt-4">
-      <button class="button" @click="downloadCSV">Download CSV</button>
+    <button @click="calculatePlan" class="btn mt-4">Calculate Plan</button>
+
+    <div v-if="summary" class="mt-6 bg-blue-50 p-4 rounded shadow">
+      <h3 class="font-bold text-lg mb-2">Summary</h3>
+      <p>Total Interest: ₹{{ summary.totalInterest.toFixed(2) }}</p>
+      <p>Total Duration: {{ summary.duration }} months</p>
+      <p>Months Saved: {{ summary.monthsSaved }}</p>
+
+      <div v-for="(p, idx) in summary.disbursements" :key="idx" class="mt-2">
+        <h4 class="font-semibold">Phase {{ idx + 1 }}: Month {{ p.month }}</h4>
+        <p>Loan Balance at Disbursement: ₹{{ p.balance.toFixed(2) }}</p>
+        <p>EMI from this phase: ₹{{ p.emi.toFixed(2) }}</p>
+      </div>
     </div>
 
-    <table class="table mt-6">
-      <thead>
-        <tr>
-          <th>Month</th>
-          <th>EMI</th>
-          <th>Principal</th>
-          <th>Interest</th>
-          <th>Extra</th>
-          <th>Lump Sum</th>
-          <th>Balance</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="(item, idx) in schedule" :key="idx">
-          <td>{{ item.month }}</td>
-          <td>{{ item.emi.toFixed(2) }}</td>
-          <td>{{ item.principal.toFixed(2) }}</td>
-          <td>{{ item.interest.toFixed(2) }}</td>
-          <td>{{ item.extra.toFixed(2) }}</td>
-          <td>{{ item.lump.toFixed(2) }}</td>
-          <td>{{ item.balance.toFixed(2) }}</td>
-        </tr>
-      </tbody>
-    </table>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+      <canvas id="barChartPhase"></canvas>
+      <canvas id="lineChartPhase"></canvas>
+    </div>
+
+    <button @click="downloadCSV" class="btn mt-4">Download Schedule CSV</button>
   </div>
 </template>
 
@@ -111,15 +77,15 @@
 import { ref } from 'vue'
 import Chart from 'chart.js/auto'
 
-const approvedLoanAmount = ref(1000000)
-const loanTerm = ref(240)
+const approvedAmount = ref(1000000)
 const interestRate = ref(8.5)
+const loanTerm = ref(240)
 const comfortableEmi = ref(50000)
+const emiIncreaseRate = ref(0)
 const monthlyExtra = ref(0)
 
 const disbursements = ref([{ month: 1, percent: 35 }])
 const lumpSums = ref([])
-const phaseSummaries = ref([])
 const schedule = ref([])
 const summary = ref(null)
 
@@ -138,45 +104,31 @@ const calculateEMI = (principal, rate, months) => {
 
 const calculatePlan = () => {
   schedule.value = []
-  phaseSummaries.value = []
-  let balance = 0
+  summary.value = null
+
+  const totalTerm = loanTerm.value
   let totalInterest = 0
   let month = 1
-  let currentEMI = 0
-  let disbursed = 0
-  let emiMap = new Map()
-  let totalLoan = approvedLoanAmount.value
-  let disbursedPhases = [...disbursements.value].sort((a, b) => a.month - b.month)
+  let disbursedAmount = 0
+  let balance = 0
+  let emi = 0
+  const emiPhases = []
 
-  const emiMapGenerator = () => {
-    for (const phase of disbursedPhases) {
-      let phaseAmount = totalLoan * phase.percent / 100
-      disbursed += phaseAmount
-      currentEMI = calculateEMI(disbursed, interestRate.value, loanTerm.value)
-      emiMap.set(phase.month, { emi: currentEMI, disbursed: disbursed })
-      phaseSummaries.value.push({
-        month: phase.month,
-        amount: disbursed,
-        emi: currentEMI
-      })
-    }
-  }
-
-  emiMapGenerator()
-
-  let currentBalance = 0
-  let monthlyEMI = 0
-  let currentPhaseIdx = 0
-
-  while (month <= loanTerm.value * 2 && currentBalance < totalLoan) {
-    if (emiMap.has(month)) {
-      monthlyEMI = emiMap.get(month).emi
-      currentBalance = emiMap.get(month).disbursed
+  while (month <= totalTerm * 2 && balance >= 0) {
+    const disbursementThisMonth = disbursements.value.find(d => d.month === month)
+    if (disbursementThisMonth) {
+      const disbursedNow = (approvedAmount.value * disbursementThisMonth.percent) / 100
+      disbursedAmount += disbursedNow
+      balance += disbursedNow
+      const remainingTerm = totalTerm - month + 1
+      emi = calculateEMI(balance, interestRate.value, remainingTerm)
+      emiPhases.push({ month, emi, balance })
     }
 
-    const monthlyRate = interestRate.value / 1200
-    let interest = currentBalance * monthlyRate
-    let actualEMI = Math.max(monthlyEMI, comfortableEmi.value)
+    const currentPhase = [...emiPhases].reverse().find(p => p.month <= month)
+    let actualEmi = currentPhase ? currentPhase.emi : 0
+    const yearlyBoost = Math.floor((month - 1) / 12) * (emiIncreaseRate.value / 100)
+    actualEmi *= (1 + yearlyBoost)
 
     let lumpAmount = 0
     for (const l of lumpSums.value) {
@@ -187,42 +139,43 @@ const calculatePlan = () => {
       }
     }
 
-    let extra = monthlyExtra.value
-    let totalPayment = actualEMI + extra + lumpAmount
-    let principal = totalPayment - interest
-    currentBalance = Math.max(0, currentBalance - principal)
+    const totalPayment = Math.max(actualEmi, comfortableEmi.value) + monthlyExtra.value + lumpAmount
+    const monthlyRate = interestRate.value / 1200
+    const interest = balance * monthlyRate
+    const principal = totalPayment - interest
+    balance = Math.max(0, balance - principal)
     totalInterest += interest
 
     schedule.value.push({
       month,
-      emi: actualEMI,
+      emi: actualEmi,
       interest,
       principal,
-      extra,
+      extra: monthlyExtra.value,
       lump: lumpAmount,
-      balance: currentBalance
+      balance
     })
 
-    if (currentBalance <= 0) break
+    if (balance <= 0) break
     month++
   }
 
   const savedMonths = loanTerm.value - schedule.value.length
   summary.value = {
-    lastEmi: monthlyEMI,
     totalInterest,
     duration: schedule.value.length,
-    monthsSaved: savedMonths > 0 ? savedMonths : 0
+    monthsSaved: savedMonths > 0 ? savedMonths : 0,
+    disbursements: emiPhases
   }
 
   drawCharts()
 }
 
 const drawCharts = () => {
-  const barCtx = document.getElementById('barChart')
-  const lineCtx = document.getElementById('lineChart')
-  if (barCtx.chart) barCtx.chart.destroy()
-  if (lineCtx.chart) lineCtx.chart.destroy()
+  const barCtx = document.getElementById('barChartPhase')
+  const lineCtx = document.getElementById('lineChartPhase')
+  if (barCtx?.chart) barCtx.chart.destroy()
+  if (lineCtx?.chart) lineCtx.chart.destroy()
 
   const months = schedule.value.map(x => x.month)
   const principal = schedule.value.map(x => x.principal)
@@ -262,12 +215,13 @@ const downloadCSV = () => {
   const encodedUri = encodeURI(csvContent)
   const link = document.createElement('a')
   link.setAttribute('href', encodedUri)
-  link.setAttribute('download', 'loan_schedule.csv')
+  link.setAttribute('download', 'phased_loan_schedule.csv')
   document.body.appendChild(link)
   link.click()
   document.body.removeChild(link)
 }
 </script>
+
 
 <style scoped>
 .container {
@@ -326,5 +280,16 @@ const downloadCSV = () => {
   padding: 1rem;
   border-radius: 0.5rem;
   box-shadow: 0 0 5px rgba(0,0,0,0.05);
+}
+.btn {
+  background-color: #2563eb;
+  color: white;
+  padding: 0.5rem 1rem;
+  border-radius: 0.375rem;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+.btn:hover {
+  background-color: #1d4ed8;
 }
 </style>
