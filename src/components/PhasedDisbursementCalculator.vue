@@ -173,12 +173,20 @@ const calculatePlan = () => {
   let currentBalance = 0
   let monthlyEMI = 0
   let currentPhaseIdx = 0
-
-  while (month <= loanTerm.value * 2 && currentBalance < totalLoan) {
+  
+  // Track the maximum month from all phases to ensure we don't exit early
+  const maxPhaseMonth = Math.max(...disbursedPhases.map(phase => phase.month));
+  
+  // Continue until we've processed all phases and paid off the balance
+  while (month <= loanTerm.value * 2 && (currentBalance > 0 || month <= maxPhaseMonth)) {
     const yearlyEMIBoost = Math.floor((month - 1) / 12) * (emiIncreaseRate.value / 100)
+    
+    // Check if there's a disbursement for this month
     if (emiMap.has(month)) {
       monthlyEMI = emiMap.get(month).emi
+      // Update the current balance with the new disbursement amount
       currentBalance = emiMap.get(month).disbursed
+      currentPhaseIdx++
     }
 
     const monthlyRate = interestRate.value / 1200
@@ -211,7 +219,8 @@ const calculatePlan = () => {
       balance: currentBalance
     })
 
-    if (currentBalance <= 0) break
+    // Only break if balance is 0 AND we've processed all phases
+    if (currentBalance <= 0 && month > maxPhaseMonth) break
     month++
   }
 
