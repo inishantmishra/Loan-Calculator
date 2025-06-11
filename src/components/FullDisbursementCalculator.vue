@@ -33,10 +33,15 @@
       </div>
 
     <div class="mt-4">
-      <label class="label">Lump Sum Payments</label>
-      <div class="grid grid-cols-2 gap-4" v-for="(lump, index) in lumpSums" :key="index">
-        <input v-model.number="lump.month" class="input" type="number" placeholder="Month" />
+      <label class="label">Lump Sum Payments (Recurring or One-Time)</label>
+      <div class="grid grid-cols-4 gap-4" v-for="(lump, index) in lumpSums" :key="index">
+        <input v-model.number="lump.month" class="input" type="number" placeholder="Start Month" />
         <input v-model.number="lump.amount" class="input" type="number" placeholder="Amount" />
+        <select v-model="lump.recurring" class="input">
+          <option :value="false">One-Time</option>
+          <option :value="true">Recurring</option>
+        </select>
+        <input v-if="lump.recurring" v-model.number="lump.repeat" class="input" type="number" placeholder="Repeat Every N Months" />
       </div>
       <button class="button" @click="addLumpSum">Add Lump Sum</button>
     </div>
@@ -100,14 +105,14 @@ const interestRate = ref(8.5);
 const monthlyExtra = ref(0);
 const comfortableEmi = ref(50000)
 const emiIncreaseRate = ref(0)
-const lumpSums = ref([{ month: 12, amount: 50000 }]);
+const lumpSums = ref([{ month: 12, amount: 50000, recurring: false, repeat: 0 }]);
 const schedule = ref([]);
 const summary = ref(null);
 let barChart = null;
 let lineChart = null;
 
 function addLumpSum() {
-  lumpSums.value.push({ month: 0, amount: 0 });
+  lumpSums.value.push({ month: 1, amount: 0, recurring: false, repeat: 0 });
 }
 
 function calculateEMI(P, N, R) {
@@ -135,7 +140,11 @@ function calculatePlan() {
     let lump = 0;
 
     lumpSums.value.forEach(ls => {
-      if (ls.month === month) lump += ls.amount;
+      if (ls.recurring && (month - ls.month) % ls.repeat === 0 && month >= ls.month) {
+        lump += ls.amount;
+      } else if (!ls.recurring && ls.month === month) {
+        lump += ls.amount;
+      }
     });
 
     if (principal + extra + lump > balance) {
