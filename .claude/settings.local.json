@@ -9,7 +9,15 @@
       "Bash(npm run dev:*)",
       "Bash(npm install)",
       "Bash(git reset:*)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(npm install:*)",
+      "Bash(npx playwright install:*)",
+      "Bash(node:*)",
+      "Bash(del test-phased-calculator.js)",
+      "Bash(del test-results.json)",
+      "Bash(del phased-calculator-results.png)",
+      "WebFetch(domain:localhost)",
+      "Bash(curl:*)"
     ],
     "deny": [],
     "ask": []
