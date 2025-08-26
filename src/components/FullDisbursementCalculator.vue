@@ -51,9 +51,10 @@
 
     <div v-if="summary" class="summary-box">
       <div class="summary-item">Base Monthly EMI: ₹{{ summary.emi.toLocaleString('en-IN', { maximumFractionDigits: 0 }) }}</div>
-      <div class="summary-item">Total Interest Paid: ₹{{ summary.totalInterest.toLocaleString('en-IN', { maximumFractionDigits: 0 }) }}</div>
-      <div class="summary-item">Actual Loan Duration: {{ Math.floor(summary.duration / 12) }} years {{ summary.duration % 12 }} months</div>
+      <div class="summary-item">Original Loan Term: {{ Math.floor(loanTerm / 12) }} years {{ loanTerm % 12 }} months ({{ loanTerm }} months)</div>
+      <div class="summary-item">Actual Loan Duration: {{ Math.floor(summary.duration / 12) }} years {{ summary.duration % 12 }} months ({{ summary.duration }} months)</div>
       <div class="summary-item">Months Saved: {{ summary.monthsSaved }} months</div>
+      <div class="summary-item">Total Interest Paid: ₹{{ summary.totalInterest.toLocaleString('en-IN', { maximumFractionDigits: 0 }) }}</div>
       <div class="summary-item">Interest Saved: ₹{{ summary.interestSaved ? summary.interestSaved.toLocaleString('en-IN', { maximumFractionDigits: 0 }) : 'Calculating...' }}</div>
     </div>
 
@@ -107,9 +108,9 @@ const loanAmount = ref(1000000);
 const loanTerm = ref(240);
 const interestRate = ref(8.5);
 const monthlyExtra = ref(0);
-const comfortableEmi = ref(50000)
+const comfortableEmi = ref(0)
 const emiIncreaseRate = ref(0)
-const lumpSums = ref([{ month: 12, amount: 50000, recurring: false, repeat: 0 }]);
+const lumpSums = ref([]);
 const schedule = ref([]);
 const summary = ref(null);
 let barChart = null;
