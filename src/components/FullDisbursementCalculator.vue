@@ -50,10 +50,11 @@
     <button class="button mt-4" @click="calculatePlan">Calculate Plan</button>
 
     <div v-if="summary" class="summary-box">
-      <div class="summary-item">Monthly EMI: ₹{{ summary.emi.toFixed(2) }}</div>
-      <div class="summary-item">Total Interest: ₹{{ summary.totalInterest.toFixed(2) }}</div>
-      <div class="summary-item">Loan Duration: {{ Math.floor(summary.duration / 12) }} years {{ summary.duration % 12 }} months ({{ summary.duration }} months)</div>
-      <div class="summary-item">Months Saved: {{ summary.monthsSaved }}</div>
+      <div class="summary-item">Base Monthly EMI: ₹{{ summary.emi.toLocaleString('en-IN', { maximumFractionDigits: 0 }) }}</div>
+      <div class="summary-item">Total Interest Paid: ₹{{ summary.totalInterest.toLocaleString('en-IN', { maximumFractionDigits: 0 }) }}</div>
+      <div class="summary-item">Actual Loan Duration: {{ Math.floor(summary.duration / 12) }} years {{ summary.duration % 12 }} months</div>
+      <div class="summary-item">Months Saved: {{ summary.monthsSaved }} months</div>
+      <div class="summary-item">Interest Saved: ₹{{ summary.interestSaved ? summary.interestSaved.toLocaleString('en-IN', { maximumFractionDigits: 0 }) : 'Calculating...' }}</div>
     </div>
 
     <div class="chart-wrapper">
@@ -75,21 +76,23 @@
           <th>Month</th>
           <th>Scheduled EMI</th>
           <th>Interest</th>
-          <th>Principal</th>
+          <th>Principal from EMI</th>
           <th>Prepayment</th>
+          <th>Total Principal</th>
           <th>Total Payment</th>
           <th>Outstanding Balance</th>
         </tr>
       </thead>
       <tbody>
-        <tr v-for="(item, idx) in schedule" :key="idx">
+        <tr v-for="(item, idx) in schedule" :key="idx" :class="{ 'highlight-row': item.prepayment > 0 }">
           <td>{{ item.month }}</td>
-          <td>₹{{ item.scheduledEmi.toFixed(2) }}</td>
-          <td>₹{{ item.interest.toFixed(2) }}</td>
-          <td>₹{{ item.principalFromEmi.toFixed(2) }}</td>
-          <td>₹{{ item.prepayment.toFixed(2) }}</td>
-          <td>₹{{ item.totalPayment.toFixed(2) }}</td>
-          <td>₹{{ item.balance.toFixed(2) }}</td>
+          <td>₹{{ item.scheduledEmi.toLocaleString('en-IN', { maximumFractionDigits: 0 }) }}</td>
+          <td>₹{{ item.interest.toLocaleString('en-IN', { maximumFractionDigits: 0 }) }}</td>
+          <td>₹{{ item.principalFromEmi.toLocaleString('en-IN', { maximumFractionDigits: 0 }) }}</td>
+          <td class="prepayment-cell">₹{{ item.prepayment.toLocaleString('en-IN', { maximumFractionDigits: 0 }) }}</td>
+          <td>₹{{ (item.principalFromEmi + item.prepayment).toLocaleString('en-IN', { maximumFractionDigits: 0 }) }}</td>
+          <td class="total-payment-cell">₹{{ item.totalPayment.toLocaleString('en-IN', { maximumFractionDigits: 0 }) }}</td>
+          <td>₹{{ item.balance.toLocaleString('en-IN', { maximumFractionDigits: 0 }) }}</td>
         </tr>
       </tbody>
     </table>
@@ -131,26 +134,37 @@ function calculatePlan() {
   const result = [];
   let totalInterest = 0;
   let month = 1;
+  const monthlyRate = interestRate.value / 12 / 100;
 
   while (month <= loanTerm.value * 2 && balance > 0.01) {
-    const r = interestRate.value / 12 / 100;
-    const interest = balance * r;
+    // Calculate monthly interest on outstanding balance (Indian bank style)
+    const interest = balance * monthlyRate;
     
     // Calculate EMI with yearly increase
     const yearFromStart = Math.floor((month - 1) / 12);
     const yearlyMultiplier = Math.pow(1 + (emiIncreaseRate.value / 100), yearFromStart);
     const adjustedBaseEmi = baseEmi * yearlyMultiplier;
     
-    // Calculate scheduled EMI principal component
+    // Calculate principal component from scheduled EMI (Indian bank style)
     const scheduledEmiPrincipal = Math.max(0, adjustedBaseEmi - interest);
     
     // Calculate comfortable EMI with yearly increase
-    let comfortableEmiAdjusted = comfortableEmi.value * yearlyMultiplier;
+    let comfortableEmiAdjusted = (comfortableEmi.value || 0) * yearlyMultiplier;
     
-    // Calculate total available payment
-    let totalAvailablePayment = Math.max(adjustedBaseEmi, comfortableEmiAdjusted) + monthlyExtra.value;
+    // Calculate total payment sources
+    let totalPaymentFromAllSources = adjustedBaseEmi; // Start with base EMI
     
-    // Add lump sum payments
+    // Add comfortable EMI if it's higher than base EMI
+    if (comfortableEmiAdjusted > adjustedBaseEmi) {
+      totalPaymentFromAllSources = comfortableEmiAdjusted;
+    }
+    
+    // Add monthly extra payment
+    if (monthlyExtra.value > 0) {
+      totalPaymentFromAllSources += monthlyExtra.value;
+    }
+    
+    // Add lump sum payments for this month
     let lumpSum = 0;
     lumpSums.value.forEach(ls => {
       if (ls.recurring && month >= ls.month && ls.repeat > 0 && (month - ls.month) % ls.repeat === 0) {
@@ -160,22 +174,26 @@ function calculatePlan() {
       }
     });
     
-    totalAvailablePayment += lumpSum;
+    totalPaymentFromAllSources += lumpSum;
     
-    // Calculate prepayment (amount above scheduled EMI)
-    const prepayment = Math.max(0, totalAvailablePayment - adjustedBaseEmi);
+    // Ensure total payment is never less than scheduled EMI
+    totalPaymentFromAllSources = Math.max(totalPaymentFromAllSources, adjustedBaseEmi);
     
-    // If remaining balance is less than total payment, adjust
-    if (totalAvailablePayment >= balance + interest) {
+    // Calculate prepayment (Indian bank style - excess goes to principal)
+    const prepayment = Math.max(0, totalPaymentFromAllSources - adjustedBaseEmi);
+    
+    // If remaining balance is less than total payment needed
+    if (totalPaymentFromAllSources >= balance + interest) {
       const finalPayment = balance + interest;
       const finalPrincipal = balance;
+      const finalPrepayment = Math.max(0, finalPayment - adjustedBaseEmi);
       
       result.push({
         month,
         scheduledEmi: adjustedBaseEmi,
         interest,
-        principalFromEmi: finalPrincipal,
-        prepayment: Math.max(0, finalPayment - adjustedBaseEmi),
+        principalFromEmi: Math.min(scheduledEmiPrincipal, finalPrincipal),
+        prepayment: finalPrepayment,
         totalPayment: finalPayment,
         balance: 0,
       });
@@ -184,9 +202,9 @@ function calculatePlan() {
       break;
     }
     
-    // Normal case: apply scheduled principal + prepayment
+    // Normal case: apply scheduled principal + prepayment to principal
     const totalPrincipalPayment = scheduledEmiPrincipal + prepayment;
-    balance -= totalPrincipalPayment;
+    balance = Math.max(0, balance - totalPrincipalPayment);
     totalInterest += interest;
     
     result.push({
@@ -196,18 +214,24 @@ function calculatePlan() {
       principalFromEmi: scheduledEmiPrincipal,
       prepayment,
       totalPayment: interest + totalPrincipalPayment,
-      balance: balance > 0 ? balance : 0,
+      balance,
     });
     
     month++;
   }
 
   schedule.value = result;
+  
+  // Calculate interest that would have been paid without prepayments
+  const originalTotalInterest = (baseEmi * loanTerm.value) - loanAmount.value;
+  const interestSaved = Math.max(0, originalTotalInterest - totalInterest);
+  
   summary.value = {
     emi: baseEmi,
     totalInterest,
     duration: result.length,
-    monthsSaved: loanTerm.value - result.length
+    monthsSaved: Math.max(0, loanTerm.value - result.length),
+    interestSaved
   };
 
   renderCharts(result);
@@ -250,16 +274,17 @@ function renderCharts(data) {
 }
 
 function downloadCSV() {
-  let csv = 'Month,Scheduled EMI,Interest,Principal from EMI,Prepayment,Total Payment,Outstanding Balance\n';
+  let csv = 'Month,Scheduled EMI,Interest,Principal from EMI,Prepayment,Total Principal,Total Payment,Outstanding Balance\n';
   schedule.value.forEach(r => {
-    csv += `${r.month},${r.scheduledEmi.toFixed(2)},${r.interest.toFixed(2)},${r.principalFromEmi.toFixed(2)},${r.prepayment.toFixed(2)},${r.totalPayment.toFixed(2)},${r.balance.toFixed(2)}\n`;
+    const totalPrincipal = r.principalFromEmi + r.prepayment;
+    csv += `${r.month},${r.scheduledEmi.toFixed(2)},${r.interest.toFixed(2)},${r.principalFromEmi.toFixed(2)},${r.prepayment.toFixed(2)},${totalPrincipal.toFixed(2)},${r.totalPayment.toFixed(2)},${r.balance.toFixed(2)}\n`;
   });
 
   const blob = new Blob([csv], { type: 'text/csv' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'amortization_schedule.csv';
+  a.download = 'loan_amortization_schedule.csv';
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -334,5 +359,16 @@ function downloadCSV() {
   padding: 0.25rem 0.5rem;
   border-radius: 0.25rem;
   font-size: 0.75rem;
+}
+.highlight-row {
+  background-color: #f0f9ff;
+}
+.prepayment-cell {
+  background-color: #dcfce7;
+  font-weight: 600;
+}
+.total-payment-cell {
+  background-color: #fef3c7;
+  font-weight: 600;
 }
 </style>
