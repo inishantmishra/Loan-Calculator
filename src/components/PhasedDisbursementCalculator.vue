@@ -2,7 +2,11 @@
   <div class="container">
     <h1 class="text-2xl font-bold mb-4">Phased Disbursement Calculator</h1>
 
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div>
+        <label class="label">Total Flat Amount</label>
+        <input v-model.number="totalFlatAmount" class="input" type="number" />
+      </div>
       <div>
         <label class="label">Approved Loan Amount</label>
         <input v-model.number="approvedLoanAmount" class="input" type="number" />
@@ -19,16 +23,80 @@
         <label class="label">Comfortable Minimum EMI Per Month</label>
         <input v-model.number="comfortableEmi" class="input" type="number" />
       </div>
+      <div>
+        <label class="label">Input Mode</label>
+        <select v-model="inputMode" class="input">
+          <option value="percentage">Percentage Mode</option>
+          <option value="amount">Amount Mode</option>
+        </select>
+      </div>
     </div>
 
     <div class="mt-4">
-      <h2 class="text-lg font-semibold">Disbursement Phases</h2>
-      <div class="grid grid-cols-3 gap-4" v-for="(phase, index) in disbursements" :key="index">
-        <input v-model.number="phase.month" class="input" type="number" placeholder="Disbursement Month" />
-        <input v-model.number="phase.percent" class="input" type="number" placeholder="% of Loan" />
-        <button class="button delete-btn" @click="removeDisbursement(index)">Delete</button>
+      <h2 class="text-lg font-semibold mb-4">Disbursement Phases</h2>
+      <div class="phase-container" v-for="(phase, index) in disbursements" :key="index">
+        <div class="phase-header">
+          <h3 class="font-medium">Phase {{ index + 1 }}</h3>
+          <button class="button delete-btn" @click="removeDisbursement(index)">Delete</button>
+        </div>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mt-2">
+          <div>
+            <label class="label-sm">Month</label>
+            <input v-model.number="phase.month" class="input" type="number" placeholder="Month" />
+          </div>
+          <div>
+            <label class="label-sm">Builder Demand ({{ inputMode === 'percentage' ? '%' : '₹' }})</label>
+            <input 
+              v-model.number="phase.builderDemand" 
+              class="input" 
+              type="number" 
+              :placeholder="inputMode === 'percentage' ? 'Builder %' : 'Amount'" 
+              @input="updatePhaseCalculations(index)"
+            />
+          </div>
+          <div>
+            <label class="label-sm">Self Contribution ({{ inputMode === 'percentage' ? '%' : '₹' }})</label>
+            <input 
+              v-model.number="phase.selfContribution" 
+              class="input" 
+              type="number" 
+              :placeholder="inputMode === 'percentage' ? 'Self %' : 'Amount'" 
+              @input="updatePhaseCalculations(index)"
+            />
+          </div>
+          <div>
+            <label class="label-sm">Bank Loan ({{ inputMode === 'percentage' ? '%' : '₹' }})</label>
+            <input 
+              v-model.number="phase.bankLoan" 
+              class="input" 
+              type="number" 
+              :placeholder="inputMode === 'percentage' ? 'Bank %' : 'Amount'" 
+              readonly
+              :class="'readonly-input'"
+            />
+          </div>
+        </div>
+        <div class="phase-info mt-2" v-if="totalFlatAmount > 0">
+          <div class="info-grid">
+            <span><strong>Builder:</strong> {{ formatCurrency(phase.builderDemandAmount) }} ({{ phase.builderDemandPercent?.toFixed(1) }}%)</span>
+            <span><strong>Self:</strong> {{ formatCurrency(phase.selfContributionAmount) }} ({{ phase.selfContributionPercent?.toFixed(1) }}%)</span>
+            <span><strong>Bank:</strong> {{ formatCurrency(phase.bankLoanAmount) }} ({{ phase.bankLoanPercent?.toFixed(1) }}%)</span>
+          </div>
+        </div>
       </div>
       <button class="button mt-2" @click="addDisbursement">Add Phase</button>
+      
+      <div class="validation-summary mt-4" v-if="disbursements.length > 0 && totalFlatAmount > 0">
+        <h3 class="font-medium mb-2">Validation Summary:</h3>
+        <div class="validation-grid">
+          <div :class="[totalPhasePercentage === 100 ? 'text-green-600' : 'text-red-600']">
+            <strong>Total Phases Coverage:</strong> {{ totalPhasePercentage.toFixed(1) }}% of flat cost
+          </div>
+          <div :class="[totalBankLoanUsed <= approvedLoanAmount ? 'text-green-600' : 'text-red-600']">
+            <strong>Loan Utilization:</strong> {{ formatCurrency(totalBankLoanUsed) }} / {{ formatCurrency(approvedLoanAmount) }}
+          </div>
+        </div>
+      </div>
     </div>
 
     <div class="mt-4">
@@ -61,9 +129,26 @@
     <div v-if="phaseSummaries.length" class="summary-box">
       <div v-for="(phase, i) in phaseSummaries" :key="i" class="summary-item">
         <p><strong>Phase {{ i + 1 }} (Month {{ phase.month }})</strong></p>
-        <p>Amount: ₹{{ phase.amount.toLocaleString('en-IN', { maximumFractionDigits: 0 }) }}</p>
+        <p>Builder Demand: {{ formatCurrency(phase.builderDemandAmount) }}</p>
+        <p>Self Paid: {{ formatCurrency(phase.selfContributionAmount) }}</p>
+        <p>Bank Loan: {{ formatCurrency(phase.bankLoanAmount) }}</p>
+        <p>Phase EMI: {{ formatCurrency(phase.emi) }}</p>
         <p>Remaining Tenure: {{ phase.remainingTenure }} months</p>
-        <p>Phase EMI: ₹{{ phase.emi.toLocaleString('en-IN', { maximumFractionDigits: 0 }) }}</p>
+      </div>
+    </div>
+    
+    <div v-if="summary" class="summary-box mt-4">
+      <div class="summary-item">
+        <p><strong>Loan Balances</strong></p>
+        <p>Approved Loan: {{ formatCurrency(approvedLoanAmount) }}</p>
+        <p>Loan Used: {{ formatCurrency(totalBankLoanUsed) }}</p>
+        <p>Loan Remaining: {{ formatCurrency(approvedLoanAmount - totalBankLoanUsed) }}</p>
+      </div>
+      <div class="summary-item">
+        <p><strong>Property Balances</strong></p>
+        <p>Total Flat Cost: {{ formatCurrency(totalFlatAmount) }}</p>
+        <p>Amount Paid: {{ formatCurrency(summary.totalPaid) }}</p>
+        <p>Amount Remaining: {{ formatCurrency(totalFlatAmount - summary.totalPaid) }}</p>
       </div>
     </div>
 
@@ -120,24 +205,60 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import Chart from 'chart.js/auto'
 
-const approvedLoanAmount = ref(1000000)
+const totalFlatAmount = ref(10000000)
+const approvedLoanAmount = ref(8000000)
 const loanTerm = ref(240)
 const interestRate = ref(8.5)
 const comfortableEmi = ref(0)
 const monthlyExtra = ref(0)
 const emiIncreaseRate = ref(0)
+const inputMode = ref('percentage')
 
-const disbursements = ref([{ month: 1, percent: 35 }])
+const disbursements = ref([{ 
+  month: 1, 
+  builderDemand: 35, 
+  selfContribution: 17, 
+  bankLoan: 18,
+  builderDemandAmount: 0,
+  selfContributionAmount: 0,
+  bankLoanAmount: 0,
+  builderDemandPercent: 0,
+  selfContributionPercent: 0,
+  bankLoanPercent: 0
+}])
+
+const totalPhasePercentage = computed(() => {
+  return disbursements.value.reduce((sum, phase) => {
+    return sum + (phase.builderDemandPercent || 0)
+  }, 0)
+})
+
+const totalBankLoanUsed = computed(() => {
+  return disbursements.value.reduce((sum, phase) => {
+    return sum + (phase.bankLoanAmount || 0)
+  }, 0)
+})
 const lumpSums = ref([])
 const phaseSummaries = ref([])
 const schedule = ref([])
 const summary = ref(null)
 
 const addDisbursement = () => {
-  disbursements.value.push({ month: 1, percent: 0 })
+  disbursements.value.push({
+    month: 1,
+    builderDemand: 0,
+    selfContribution: 0,
+    bankLoan: 0,
+    builderDemandAmount: 0,
+    selfContributionAmount: 0,
+    bankLoanAmount: 0,
+    builderDemandPercent: 0,
+    selfContributionPercent: 0,
+    bankLoanPercent: 0
+  })
 }
 
 const removeDisbursement = (index) => {
@@ -157,11 +278,52 @@ const calculateEMI = (principal, rate, months) => {
   return principal * r * Math.pow(1 + r, months) / (Math.pow(1 + r, months) - 1)
 }
 
+const formatCurrency = (amount) => {
+  if (!amount) return '₹0'
+  return '₹' + amount.toLocaleString('en-IN', { maximumFractionDigits: 0 })
+}
+
+const updatePhaseCalculations = (index) => {
+  const phase = disbursements.value[index]
+  if (!totalFlatAmount.value) return
+  
+  if (inputMode.value === 'percentage') {
+    // Convert percentages to amounts
+    phase.builderDemandAmount = (phase.builderDemand / 100) * totalFlatAmount.value
+    phase.selfContributionAmount = (phase.selfContribution / 100) * totalFlatAmount.value
+    phase.bankLoanAmount = phase.builderDemandAmount - phase.selfContributionAmount
+    
+    // Update percentage fields
+    phase.builderDemandPercent = phase.builderDemand
+    phase.selfContributionPercent = phase.selfContribution
+    phase.bankLoanPercent = (phase.bankLoanAmount / totalFlatAmount.value) * 100
+    phase.bankLoan = phase.bankLoanPercent
+  } else {
+    // Convert amounts to percentages
+    phase.builderDemandAmount = phase.builderDemand
+    phase.selfContributionAmount = phase.selfContribution
+    phase.bankLoanAmount = phase.builderDemandAmount - phase.selfContributionAmount
+    
+    // Update amount fields
+    phase.builderDemandPercent = (phase.builderDemandAmount / totalFlatAmount.value) * 100
+    phase.selfContributionPercent = (phase.selfContributionAmount / totalFlatAmount.value) * 100
+    phase.bankLoanPercent = (phase.bankLoanAmount / totalFlatAmount.value) * 100
+    phase.bankLoan = phase.bankLoanAmount
+  }
+  
+  // Ensure bank loan is not negative
+  if (phase.bankLoanAmount < 0) {
+    phase.bankLoanAmount = 0
+    phase.bankLoanPercent = 0
+    phase.bankLoan = 0
+  }
+}
+
 const calculatePlan = () => {
   schedule.value = []
   phaseSummaries.value = []
   
-  if (!disbursements.value.length) return
+  if (!disbursements.value.length || !totalFlatAmount.value) return
   
   // Sort disbursements by month
   const sortedDisbursements = [...disbursements.value].sort((a, b) => a.month - b.month)
@@ -172,46 +334,59 @@ const calculatePlan = () => {
   let currentTotalEMI = 0
   const monthlyRate = interestRate.value / 12 / 100
   
-  // Calculate phase summaries
-  let cumulativeDisbursed = 0
+  // Update all phase calculations first
+  disbursements.value.forEach((_, index) => updatePhaseCalculations(index))
+  
+  // Calculate phase summaries - only for bank loan portions
+  let cumulativeBankLoanDisbursed = 0
+  let cumulativeTotalPaid = 0
+  
   for (const phase of sortedDisbursements) {
-    const phaseAmount = approvedLoanAmount.value * phase.percent / 100
-    cumulativeDisbursed += phaseAmount
-    const remainingTenure = loanTerm.value - (phase.month - 1)
-    const phaseEMI = calculateEMI(phaseAmount, interestRate.value, remainingTenure)
-    
-    phaseSummaries.value.push({
-      month: phase.month,
-      amount: phaseAmount,
-      cumulativeAmount: cumulativeDisbursed,
-      emi: phaseEMI,
-      remainingTenure
-    })
+    const bankLoanAmount = phase.bankLoanAmount || 0
+    if (bankLoanAmount > 0) {
+      cumulativeBankLoanDisbursed += bankLoanAmount
+      const remainingTenure = loanTerm.value - (phase.month - 1)
+      const phaseEMI = calculateEMI(bankLoanAmount, interestRate.value, remainingTenure)
+      
+      phaseSummaries.value.push({
+        month: phase.month,
+        builderDemandAmount: phase.builderDemandAmount,
+        selfContributionAmount: phase.selfContributionAmount,
+        bankLoanAmount: bankLoanAmount,
+        emi: phaseEMI,
+        remainingTenure
+      })
+    }
+    cumulativeTotalPaid += (phase.builderDemandAmount || 0)
   }
 
   const maxPhaseMonth = Math.max(...sortedDisbursements.map(p => p.month))
   
-  while (month <= loanTerm.value * 2 && (currentBalance > 0.01 || month <= maxPhaseMonth)) {
+  let currentLoanBalance = 0  // Only bank loan balance, not self contribution
+  
+  while (month <= loanTerm.value * 2 && (currentLoanBalance > 0.01 || month <= maxPhaseMonth)) {
     // Check for new disbursement this month
     const disbursementThisMonth = sortedDisbursements.find(d => d.month === month)
     if (disbursementThisMonth) {
-      const phaseAmount = approvedLoanAmount.value * disbursementThisMonth.percent / 100
-      currentBalance += phaseAmount
-      
-      // Calculate EMI for this new phase
-      const remainingTenure = loanTerm.value - (month - 1)
-      const newPhaseEMI = calculateEMI(phaseAmount, interestRate.value, remainingTenure)
-      currentTotalEMI += newPhaseEMI
+      const bankLoanAmount = disbursementThisMonth.bankLoanAmount || 0
+      if (bankLoanAmount > 0) {
+        currentLoanBalance += bankLoanAmount
+        
+        // Calculate EMI for this new bank loan portion only
+        const remainingTenure = loanTerm.value - (month - 1)
+        const newPhaseEMI = calculateEMI(bankLoanAmount, interestRate.value, remainingTenure)
+        currentTotalEMI += newPhaseEMI
+      }
     }
 
-    // Skip months before first disbursement
-    if (currentBalance === 0) {
+    // Skip months before first disbursement or if no bank loan
+    if (currentLoanBalance === 0) {
       month++
       continue
     }
 
-    // Calculate interest on outstanding balance (Indian bank style)
-    const interest = currentBalance * monthlyRate
+    // Calculate interest on outstanding bank loan balance only (Indian bank style)
+    const interest = currentLoanBalance * monthlyRate
     
     // Calculate EMI with yearly increase
     const yearFromStart = Math.floor((month - 1) / 12)
@@ -290,7 +465,7 @@ const calculatePlan = () => {
     
     // Normal case
     const totalPrincipalPayment = scheduledEmiPrincipal + prepayment
-    currentBalance = Math.max(0, currentBalance - totalPrincipalPayment)
+    currentLoanBalance = Math.max(0, currentLoanBalance - totalPrincipalPayment)
     totalInterest += interest
     
     // Scheduled EMI entry
@@ -302,7 +477,7 @@ const calculatePlan = () => {
       principalFromEmi: scheduledEmiPrincipal,
       prepayment: 0,
       totalPayment: adjustedBaseEMI,
-      balance: Math.max(0, currentBalance + prepayment)
+      balance: Math.max(0, currentLoanBalance + prepayment)
     })
     
     // Prepayment entry if any
@@ -315,7 +490,7 @@ const calculatePlan = () => {
         principalFromEmi: 0,
         prepayment: prepayment,
         totalPayment: prepayment,
-        balance: currentBalance
+        balance: currentLoanBalance
       })
     }
     
@@ -323,8 +498,10 @@ const calculatePlan = () => {
   }
 
   // Calculate interest savings
-  const lastScheduleMonth = Math.max(...schedule.value.filter(s => s.type === 'EMI').map(s => s.month))
-  const originalTotalInterest = (currentTotalEMI * loanTerm.value) - cumulativeDisbursed
+  const lastScheduleMonth = schedule.value.length > 0 ? 
+    Math.max(...schedule.value.filter(s => s.type === 'EMI').map(s => s.month)) : 0
+  const originalTotalInterest = cumulativeBankLoanDisbursed > 0 ? 
+    (currentTotalEMI * loanTerm.value) - cumulativeBankLoanDisbursed : 0
   const interestSaved = Math.max(0, originalTotalInterest - totalInterest)
   
   summary.value = {
@@ -333,7 +510,8 @@ const calculatePlan = () => {
     duration: lastScheduleMonth,
     monthsSaved: Math.max(0, loanTerm.value - lastScheduleMonth),
     interestSaved,
-    totalDisbursed: cumulativeDisbursed
+    totalDisbursed: cumulativeBankLoanDisbursed,
+    totalPaid: cumulativeTotalPaid
   }
 
   drawCharts()
@@ -479,5 +657,56 @@ const downloadCSV = () => {
 .type-cell {
   font-weight: 600;
   font-size: 0.75rem;
+}
+.phase-container {
+  background-color: #f8fafc;
+  padding: 1rem;
+  border-radius: 0.5rem;
+  margin-bottom: 1rem;
+  border-left: 4px solid #3b82f6;
+}
+.phase-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+.label-sm {
+  font-size: 0.75rem;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+  display: block;
+}
+.phase-info {
+  background-color: #e0f2fe;
+  padding: 0.5rem;
+  border-radius: 0.375rem;
+  font-size: 0.875rem;
+}
+.info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 0.5rem;
+}
+.validation-summary {
+  background-color: #fef3c7;
+  padding: 1rem;
+  border-radius: 0.5rem;
+  border-left: 4px solid #f59e0b;
+}
+.validation-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 0.5rem;
+}
+.readonly-input {
+  background-color: #f3f4f6;
+  cursor: not-allowed;
+}
+.text-green-600 {
+  color: #059669;
+}
+.text-red-600 {
+  color: #dc2626;
 }
 </style>
