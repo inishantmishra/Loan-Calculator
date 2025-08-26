@@ -137,29 +137,31 @@
       </div>
     </div>
     
-    <div v-if="summary" class="summary-box mt-4">
+    <!-- Consolidated summary will appear below -->
+
+    <div v-if="summary" class="summary-box">
       <div class="summary-item">
-        <p><strong>Loan Balances</strong></p>
+        <p><strong>Loan Details</strong></p>
+        <p>Total Loan Amount: {{ formatCurrency(summary.totalDisbursed || 0) }}</p>
+        <p>Final Combined EMI: {{ formatCurrency(summary.baseEmi || 0) }}</p>
+        <p>Original Term: {{ Math.floor(loanTerm / 12) }} years {{ loanTerm % 12 }} months</p>
+        <p>Actual Duration: {{ Math.floor((summary.duration || 0) / 12) }} years {{ (summary.duration || 0) % 12 }} months</p>
+        <p>Months Saved: {{ summary.monthsSaved || 0 }} months</p>
+      </div>
+      <div class="summary-item">
+        <p><strong>Financial Summary</strong></p>
+        <p>Total Interest Paid: {{ formatCurrency(summary.totalInterest || 0) }}</p>
+        <p>Interest Saved: {{ formatCurrency(summary.interestSaved || 0) }}</p>
         <p>Approved Loan: {{ formatCurrency(approvedLoanAmount) }}</p>
         <p>Loan Used: {{ formatCurrency(totalBankLoanUsed) }}</p>
         <p>Loan Remaining: {{ formatCurrency(approvedLoanAmount - totalBankLoanUsed) }}</p>
       </div>
       <div class="summary-item">
-        <p><strong>Property Balances</strong></p>
+        <p><strong>Property Progress</strong></p>
         <p>Total Flat Cost: {{ formatCurrency(totalFlatAmount) }}</p>
-        <p>Amount Paid: {{ formatCurrency(summary.totalPaid) }}</p>
-        <p>Amount Remaining: {{ formatCurrency(totalFlatAmount - summary.totalPaid) }}</p>
+        <p>Amount Paid: {{ formatCurrency(summary.totalPaid || 0) }}</p>
+        <p>Amount Remaining: {{ formatCurrency(totalFlatAmount - (summary.totalPaid || 0)) }}</p>
       </div>
-    </div>
-
-    <div v-if="summary" class="summary-box">
-      <div class="summary-item">Total Loan Amount: ₹{{ summary.totalDisbursed?.toLocaleString('en-IN', { maximumFractionDigits: 0 }) || 'N/A' }}</div>
-      <div class="summary-item">Original Loan Term: {{ Math.floor(loanTerm / 12) }} years {{ loanTerm % 12 }} months ({{ loanTerm }} months)</div>
-      <div class="summary-item">Final Combined EMI: ₹{{ summary.baseEmi?.toLocaleString('en-IN', { maximumFractionDigits: 0 }) || 'N/A' }}</div>
-      <div class="summary-item">Actual Loan Duration: {{ Math.floor(summary.duration / 12) }} years {{ summary.duration % 12 }} months ({{ summary.duration }} months)</div>
-      <div class="summary-item">Months Saved: {{ summary.monthsSaved }} months</div>
-      <div class="summary-item">Total Interest Paid: ₹{{ summary.totalInterest?.toLocaleString('en-IN', { maximumFractionDigits: 0 }) || 'N/A' }}</div>
-      <div class="summary-item">Interest Saved: ₹{{ summary.interestSaved?.toLocaleString('en-IN', { maximumFractionDigits: 0 }) || 'N/A' }}</div>
     </div>
 
     <div class="chart-wrapper">
@@ -208,27 +210,53 @@
 import { ref, computed } from 'vue'
 import Chart from 'chart.js/auto'
 
-const totalFlatAmount = ref(10000000)
-const approvedLoanAmount = ref(8000000)
+const totalFlatAmount = ref(22500000)
+const approvedLoanAmount = ref(16875000)
 const loanTerm = ref(240)
-const interestRate = ref(8.5)
+const interestRate = ref(7.1)
 const comfortableEmi = ref(0)
 const monthlyExtra = ref(0)
 const emiIncreaseRate = ref(0)
 const inputMode = ref('percentage')
 
-const disbursements = ref([{ 
-  month: 1, 
-  builderDemand: 35, 
-  selfContribution: 17, 
-  bankLoan: 18,
-  builderDemandAmount: 0,
-  selfContributionAmount: 0,
-  bankLoanAmount: 0,
-  builderDemandPercent: 0,
-  selfContributionPercent: 0,
-  bankLoanPercent: 0
-}])
+const disbursements = ref([
+  { 
+    month: 1, 
+    builderDemand: 35, 
+    selfContribution: 18, 
+    bankLoan: 17,
+    builderDemandAmount: 7875000,
+    selfContributionAmount: 4050000,
+    bankLoanAmount: 3825000,
+    builderDemandPercent: 35,
+    selfContributionPercent: 18,
+    bankLoanPercent: 17
+  },
+  { 
+    month: 24, 
+    builderDemand: 35, 
+    selfContribution: 3, 
+    bankLoan: 32,
+    builderDemandAmount: 7875000,
+    selfContributionAmount: 675000,
+    bankLoanAmount: 7200000,
+    builderDemandPercent: 35,
+    selfContributionPercent: 3,
+    bankLoanPercent: 32
+  },
+  { 
+    month: 48, 
+    builderDemand: 30, 
+    selfContribution: 4, 
+    bankLoan: 26,
+    builderDemandAmount: 6750000,
+    selfContributionAmount: 900000,
+    bankLoanAmount: 5850000,
+    builderDemandPercent: 30,
+    selfContributionPercent: 4,
+    bankLoanPercent: 26
+  }
+])
 
 const totalPhasePercentage = computed(() => {
   try {
@@ -371,9 +399,12 @@ const calculatePlan = () => {
     schedule.value = []
     phaseSummaries.value = []
     
-    if (!disbursements.value.length || !totalFlatAmount.value) return
+    if (!disbursements.value.length || !totalFlatAmount.value || totalFlatAmount.value <= 0) {
+      console.log('calculatePlan early exit:', { disbursements: disbursements.value.length, totalFlat: totalFlatAmount.value })
+      return
+    }
     
-    // Update all phase calculations first and validate
+    // Update all phase calculations first
     disbursements.value.forEach((_, index) => {
       try {
         updatePhaseCalculations(index)
@@ -385,43 +416,58 @@ const calculatePlan = () => {
     // Sort disbursements by month
     const sortedDisbursements = [...disbursements.value].sort((a, b) => (a.month || 1) - (b.month || 1))
   
-  let totalInterest = 0
-  let month = 1
-  let currentBalance = 0
-  let currentTotalEMI = 0
-  const monthlyRate = interestRate.value / 12 / 100
-  
-  // Update all phase calculations first
-  disbursements.value.forEach((_, index) => updatePhaseCalculations(index))
-  
-  // Calculate phase summaries - only for bank loan portions
-  let cumulativeBankLoanDisbursed = 0
-  let cumulativeTotalPaid = 0
-  
-  for (const phase of sortedDisbursements) {
-    const bankLoanAmount = phase.bankLoanAmount || 0
-    if (bankLoanAmount > 0) {
-      cumulativeBankLoanDisbursed += bankLoanAmount
-      const remainingTenure = loanTerm.value - (phase.month - 1)
-      const phaseEMI = calculateEMI(bankLoanAmount, interestRate.value, remainingTenure)
-      
-      phaseSummaries.value.push({
-        month: phase.month,
-        builderDemandAmount: phase.builderDemandAmount,
-        selfContributionAmount: phase.selfContributionAmount,
-        bankLoanAmount: bankLoanAmount,
-        emi: phaseEMI,
-        remainingTenure
+    let totalInterest = 0
+    let month = 1
+    let currentLoanBalance = 0  // Only bank loan balance, not self contribution
+    let currentTotalEMI = 0
+    const monthlyRate = interestRate.value / 12 / 100
+    
+    // Calculate phase summaries - only for bank loan portions
+    let cumulativeBankLoanDisbursed = 0
+    let cumulativeTotalPaid = 0
+    
+    for (const phase of sortedDisbursements) {
+      const bankLoanAmount = phase.bankLoanAmount || 0
+      console.log(`Phase ${phase.month}:`, {
+        builderDemand: phase.builderDemandAmount,
+        selfContribution: phase.selfContributionAmount,
+        bankLoan: bankLoanAmount
       })
+      
+      if (bankLoanAmount > 0) {
+        cumulativeBankLoanDisbursed += bankLoanAmount
+        const remainingTenure = Math.max(1, loanTerm.value - (phase.month - 1))
+        const phaseEMI = calculateEMI(bankLoanAmount, interestRate.value, remainingTenure)
+        
+        console.log(`Phase ${phase.month} EMI calculation:`, {
+          bankLoanAmount,
+          remainingTenure,
+          interestRate: interestRate.value,
+          calculatedEMI: phaseEMI
+        })
+        
+        phaseSummaries.value.push({
+          month: phase.month,
+          builderDemandAmount: phase.builderDemandAmount,
+          selfContributionAmount: phase.selfContributionAmount,
+          bankLoanAmount: bankLoanAmount,
+          emi: phaseEMI,
+          remainingTenure
+        })
+      }
+      cumulativeTotalPaid += (phase.builderDemandAmount || 0) + (phase.selfContributionAmount || 0)
     }
-    cumulativeTotalPaid += (phase.builderDemandAmount || 0)
-  }
 
-  const maxPhaseMonth = Math.max(...sortedDisbursements.map(p => p.month))
-  
-  let currentLoanBalance = 0  // Only bank loan balance, not self contribution
-  
-  while (month <= loanTerm.value * 2 && (currentLoanBalance > 0.01 || month <= maxPhaseMonth)) {
+    const maxPhaseMonth = Math.max(...sortedDisbursements.map(p => p.month || 1), 1)
+    
+    console.log('Starting calculation:', { 
+      phases: sortedDisbursements.length, 
+      maxPhaseMonth, 
+      cumulativeBankLoan: cumulativeBankLoanDisbursed,
+      totalFlatAmount: totalFlatAmount.value 
+    })
+    
+    while (month <= loanTerm.value * 2 && (currentLoanBalance > 0.01 || month <= maxPhaseMonth)) {
     // Check for new disbursement this month
     const disbursementThisMonth = sortedDisbursements.find(d => d.month === month)
     if (disbursementThisMonth) {
@@ -429,10 +475,16 @@ const calculatePlan = () => {
       if (bankLoanAmount > 0) {
         currentLoanBalance += bankLoanAmount
         
-        // Calculate EMI for this new bank loan portion only
-        const remainingTenure = loanTerm.value - (month - 1)
-        const newPhaseEMI = calculateEMI(bankLoanAmount, interestRate.value, remainingTenure)
-        currentTotalEMI += newPhaseEMI
+        // Recalculate TOTAL EMI for ALL outstanding loans with current remaining tenure
+        const remainingTenure = Math.max(1, loanTerm.value - (month - 1))
+        currentTotalEMI = calculateEMI(currentLoanBalance, interestRate.value, remainingTenure)
+        
+        console.log(`Month ${month} - New disbursement:`, {
+          bankLoanAmount,
+          currentLoanBalance,
+          remainingTenure,
+          recalculatedTotalEMI: currentTotalEMI
+        })
       }
     }
 
@@ -485,10 +537,12 @@ const calculatePlan = () => {
     const prepayment = Math.max(0, totalPaymentFromAllSources - adjustedBaseEMI)
     
     // Handle final payment
-    if (totalPaymentFromAllSources >= currentBalance + interest) {
-      const finalPayment = currentBalance + interest
-      const finalPrincipal = currentBalance
-      const finalPrepayment = Math.max(0, finalPayment - adjustedBaseEMI)
+    if (totalPaymentFromAllSources >= currentLoanBalance + interest) {
+      const finalPayment = currentLoanBalance + interest
+      const finalPrincipal = currentLoanBalance
+      const actualEMIPrincipal = Math.min(scheduledEmiPrincipal, finalPrincipal)
+      const actualEMIPayment = Math.min(adjustedBaseEMI, interest + actualEMIPrincipal)
+      const remainingPrincipal = Math.max(0, finalPrincipal - actualEMIPrincipal)
       
       // Scheduled EMI entry
       schedule.value.push({
@@ -496,22 +550,22 @@ const calculatePlan = () => {
         type: 'EMI',
         scheduledEmi: adjustedBaseEMI,
         interest,
-        principalFromEmi: Math.min(scheduledEmiPrincipal, finalPrincipal),
+        principalFromEmi: actualEMIPrincipal,
         prepayment: 0,
-        totalPayment: Math.min(adjustedBaseEMI, finalPayment),
-        balance: Math.max(0, currentBalance - Math.min(scheduledEmiPrincipal, finalPrincipal))
+        totalPayment: actualEMIPayment,
+        balance: remainingPrincipal
       })
       
-      // Prepayment entry if any
-      if (finalPrepayment > 0) {
+      // Prepayment entry if any remaining principal
+      if (remainingPrincipal > 0) {
         schedule.value.push({
           month,
           type: 'Prepayment',
           scheduledEmi: 0,
           interest: 0,
           principalFromEmi: 0,
-          prepayment: finalPrepayment,
-          totalPayment: finalPrepayment,
+          prepayment: remainingPrincipal,
+          totalPayment: remainingPrincipal,
           balance: 0
         })
       }
@@ -521,8 +575,8 @@ const calculatePlan = () => {
     }
     
     // Normal case
-    const totalPrincipalPayment = scheduledEmiPrincipal + prepayment
-    currentLoanBalance = Math.max(0, currentLoanBalance - totalPrincipalPayment)
+    // First, apply scheduled EMI principal
+    const balanceAfterEMI = Math.max(0, currentLoanBalance - scheduledEmiPrincipal)
     totalInterest += interest
     
     // Scheduled EMI entry
@@ -534,11 +588,12 @@ const calculatePlan = () => {
       principalFromEmi: scheduledEmiPrincipal,
       prepayment: 0,
       totalPayment: adjustedBaseEMI,
-      balance: Math.max(0, currentLoanBalance + prepayment)
+      balance: balanceAfterEMI
     })
     
-    // Prepayment entry if any
+    // Then apply prepayment if any
     if (prepayment > 0) {
+      const balanceAfterPrepayment = Math.max(0, balanceAfterEMI - prepayment)
       schedule.value.push({
         month,
         type: 'Prepayment',
@@ -547,28 +602,53 @@ const calculatePlan = () => {
         principalFromEmi: 0,
         prepayment: prepayment,
         totalPayment: prepayment,
-        balance: currentLoanBalance
+        balance: balanceAfterPrepayment
       })
+      currentLoanBalance = balanceAfterPrepayment
+    } else {
+      currentLoanBalance = balanceAfterEMI
     }
     
     month++
   }
 
-  // Calculate interest savings
-  const lastScheduleMonth = schedule.value.length > 0 ? 
-    Math.max(...schedule.value.filter(s => s.type === 'EMI').map(s => s.month)) : 0
+  // Calculate interest savings and final EMI properly
+  const emiEntries = schedule.value.filter(s => s.type === 'EMI')
+  const lastScheduleMonth = emiEntries.length > 0 ? 
+    Math.max(...emiEntries.map(s => s.month)) : 0
+    
+  // Calculate what the original total interest would have been if all loans were taken at month 1
   const originalTotalInterest = cumulativeBankLoanDisbursed > 0 ? 
-    (currentTotalEMI * loanTerm.value) - cumulativeBankLoanDisbursed : 0
+    (calculateEMI(cumulativeBankLoanDisbursed, interestRate.value, loanTerm.value) * loanTerm.value) - cumulativeBankLoanDisbursed : 0
   const interestSaved = Math.max(0, originalTotalInterest - totalInterest)
   
+  // Find the final combined EMI from the last EMI entry
+  const finalCombinedEMI = emiEntries.length > 0 ? 
+    emiEntries[emiEntries.length - 1].scheduledEmi : 0
+  
+  console.log('Final Summary Calculation:', {
+    lastScheduleMonth,
+    originalTotalInterest,
+    totalInterestPaid: totalInterest,
+    interestSaved,
+    finalCombinedEMI,
+    cumulativeBankLoanDisbursed,
+    scheduleEntries: schedule.value.length
+  })
+  
   summary.value = {
-    baseEmi: currentTotalEMI,
+    baseEmi: finalCombinedEMI,
     totalInterest,
     duration: lastScheduleMonth,
     monthsSaved: Math.max(0, loanTerm.value - lastScheduleMonth),
     interestSaved,
     totalDisbursed: cumulativeBankLoanDisbursed,
     totalPaid: cumulativeTotalPaid
+  }
+
+  console.log('Schedule array length:', schedule.value.length)
+  if (schedule.value.length > 0) {
+    console.log('First few schedule entries:', schedule.value.slice(0, 3))
   }
 
     drawCharts()
@@ -581,21 +661,37 @@ const calculatePlan = () => {
   }
 }
 
+let barChart = null
+let lineChart = null
+
 const drawCharts = () => {
   try {
     const barCtx = document.getElementById('barChart')
     const lineCtx = document.getElementById('lineChart')
     
-    if (!barCtx || !lineCtx) return
+    if (!barCtx || !lineCtx) {
+      console.log('Chart canvases not found')
+      return
+    }
     
-    if (barCtx.chart) barCtx.chart.destroy()
-    if (lineCtx.chart) lineCtx.chart.destroy()
+    // Destroy existing charts
+    if (barChart) {
+      barChart.destroy()
+      barChart = null
+    }
+    if (lineChart) {
+      lineChart.destroy()
+      lineChart = null
+    }
 
     // Filter only EMI entries for chart data
     const emiEntries = schedule.value.filter(x => x && x.type === 'EMI')
     const prepaymentEntries = schedule.value.filter(x => x && x.type === 'Prepayment')
     
-    if (emiEntries.length === 0) return
+    if (emiEntries.length === 0) {
+      console.log('No EMI entries for charts')
+      return
+    }
     
     const months = emiEntries.map(x => `M${x.month || 0}`)
     const principalFromEmi = emiEntries.map(x => parseFloat(x.principalFromEmi) || 0)
@@ -605,8 +701,10 @@ const drawCharts = () => {
       return prepaymentInSameMonth ? (parseFloat(prepaymentInSameMonth.prepayment) || 0) : 0
     })
     const balances = emiEntries.map(x => parseFloat(x.balance) || 0)
+    
+    console.log('Chart data:', { months: months.length, principal: principalFromEmi.length, interest: interest.length })
 
-    barCtx.chart = new Chart(barCtx, {
+    barChart = new Chart(barCtx, {
       type: 'bar',
       data: {
         labels: months,
@@ -616,17 +714,43 @@ const drawCharts = () => {
           { label: 'Prepayment', data: prepayments, backgroundColor: '#86efac' }
         ]
       },
-      options: { responsive: true, plugins: { legend: { position: 'top' } } }
+      options: { 
+        responsive: true, 
+        plugins: { 
+          legend: { position: 'top' } 
+        },
+        scales: {
+          x: { title: { display: true, text: 'Months' } },
+          y: { title: { display: true, text: 'Amount (₹)' } }
+        }
+      }
     })
 
-    lineCtx.chart = new Chart(lineCtx, {
+    lineChart = new Chart(lineCtx, {
       type: 'line',
       data: {
         labels: months,
-        datasets: [{ label: 'Outstanding Balance', data: balances, borderColor: '#7c3aed', borderWidth: 2, fill: false }]
+        datasets: [{ 
+          label: 'Outstanding Balance', 
+          data: balances, 
+          borderColor: '#7c3aed', 
+          borderWidth: 2, 
+          fill: false 
+        }]
       },
-      options: { responsive: true, plugins: { legend: { position: 'top' } } }
+      options: { 
+        responsive: true, 
+        plugins: { 
+          legend: { position: 'top' } 
+        },
+        scales: {
+          x: { title: { display: true, text: 'Months' } },
+          y: { title: { display: true, text: 'Balance (₹)' } }
+        }
+      }
     })
+    
+    console.log('Charts created successfully')
   } catch (error) {
     console.error('Error in drawCharts:', error)
   }
