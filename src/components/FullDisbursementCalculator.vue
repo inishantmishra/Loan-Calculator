@@ -75,25 +75,25 @@
       <thead>
         <tr>
           <th>Month</th>
+          <th>Type</th>
           <th>Scheduled EMI</th>
           <th>Interest</th>
           <th>Principal from EMI</th>
           <th>Prepayment</th>
-          <th>Total Principal</th>
           <th>Total Payment</th>
           <th>Outstanding Balance</th>
         </tr>
       </thead>
       <tbody>
-        <tr v-for="(item, idx) in schedule" :key="idx" :class="{ 'highlight-row': item.prepayment > 0 }">
+        <tr v-for="(item, idx) in schedule" :key="idx" :class="{ 'highlight-row': item.type === 'Prepayment', 'emi-row': item.type === 'EMI' }">
           <td>{{ item.month }}</td>
-          <td>₹{{ item.scheduledEmi.toLocaleString('en-IN', { maximumFractionDigits: 0 }) }}</td>
-          <td>₹{{ item.interest.toLocaleString('en-IN', { maximumFractionDigits: 0 }) }}</td>
-          <td>₹{{ item.principalFromEmi.toLocaleString('en-IN', { maximumFractionDigits: 0 }) }}</td>
-          <td class="prepayment-cell">₹{{ item.prepayment.toLocaleString('en-IN', { maximumFractionDigits: 0 }) }}</td>
-          <td>₹{{ (item.principalFromEmi + item.prepayment).toLocaleString('en-IN', { maximumFractionDigits: 0 }) }}</td>
-          <td class="total-payment-cell">₹{{ item.totalPayment.toLocaleString('en-IN', { maximumFractionDigits: 0 }) }}</td>
-          <td>₹{{ item.balance.toLocaleString('en-IN', { maximumFractionDigits: 0 }) }}</td>
+          <td class="type-cell">{{ item.type }}</td>
+          <td>₹{{ item.scheduledEmi?.toLocaleString('en-IN', { maximumFractionDigits: 0 }) || '0' }}</td>
+          <td>₹{{ item.interest?.toLocaleString('en-IN', { maximumFractionDigits: 0 }) || '0' }}</td>
+          <td>₹{{ item.principalFromEmi?.toLocaleString('en-IN', { maximumFractionDigits: 0 }) || '0' }}</td>
+          <td class="prepayment-cell">₹{{ item.prepayment?.toLocaleString('en-IN', { maximumFractionDigits: 0 }) || '0' }}</td>
+          <td class="total-payment-cell">₹{{ item.totalPayment?.toLocaleString('en-IN', { maximumFractionDigits: 0 }) || '0' }}</td>
+          <td>₹{{ item.balance?.toLocaleString('en-IN', { maximumFractionDigits: 0 }) || '0' }}</td>
         </tr>
       </tbody>
     </table>
@@ -189,15 +189,31 @@ function calculatePlan() {
       const finalPrincipal = balance;
       const finalPrepayment = Math.max(0, finalPayment - adjustedBaseEmi);
       
+      // Scheduled EMI entry
       result.push({
         month,
+        type: 'EMI',
         scheduledEmi: adjustedBaseEmi,
         interest,
         principalFromEmi: Math.min(scheduledEmiPrincipal, finalPrincipal),
-        prepayment: finalPrepayment,
-        totalPayment: finalPayment,
-        balance: 0,
+        prepayment: 0,
+        totalPayment: Math.min(adjustedBaseEmi, finalPayment),
+        balance: Math.max(0, balance - Math.min(scheduledEmiPrincipal, finalPrincipal))
       });
+      
+      // Prepayment entry if any
+      if (finalPrepayment > 0) {
+        result.push({
+          month,
+          type: 'Prepayment',
+          scheduledEmi: 0,
+          interest: 0,
+          principalFromEmi: 0,
+          prepayment: finalPrepayment,
+          totalPayment: finalPrepayment,
+          balance: 0
+        });
+      }
       
       totalInterest += interest;
       break;
@@ -208,20 +224,39 @@ function calculatePlan() {
     balance = Math.max(0, balance - totalPrincipalPayment);
     totalInterest += interest;
     
+    // Scheduled EMI entry
     result.push({
       month,
+      type: 'EMI',
       scheduledEmi: adjustedBaseEmi,
       interest,
       principalFromEmi: scheduledEmiPrincipal,
-      prepayment,
-      totalPayment: interest + totalPrincipalPayment,
-      balance,
+      prepayment: 0,
+      totalPayment: adjustedBaseEmi,
+      balance: Math.max(0, balance + prepayment)
     });
+    
+    // Prepayment entry if any
+    if (prepayment > 0) {
+      result.push({
+        month,
+        type: 'Prepayment',
+        scheduledEmi: 0,
+        interest: 0,
+        principalFromEmi: 0,
+        prepayment: prepayment,
+        totalPayment: prepayment,
+        balance: balance
+      });
+    }
     
     month++;
   }
 
   schedule.value = result;
+  
+  // Calculate duration from EMI entries only
+  const lastEmiMonth = Math.max(...result.filter(r => r.type === 'EMI').map(r => r.month));
   
   // Calculate interest that would have been paid without prepayments
   const originalTotalInterest = (baseEmi * loanTerm.value) - loanAmount.value;
@@ -230,8 +265,8 @@ function calculatePlan() {
   summary.value = {
     emi: baseEmi,
     totalInterest,
-    duration: result.length,
-    monthsSaved: Math.max(0, loanTerm.value - result.length),
+    duration: lastEmiMonth,
+    monthsSaved: Math.max(0, loanTerm.value - lastEmiMonth),
     interestSaved
   };
 
@@ -241,12 +276,19 @@ function calculatePlan() {
 function renderCharts(data) {
   const ctx1 = document.getElementById('barChart');
   const ctx2 = document.getElementById('lineChart');
-  const labels = data.map(d => `M${d.month}`);
-
-  const principalFromEmi = data.map(d => d.principalFromEmi);
-  const interest = data.map(d => d.interest);
-  const prepayment = data.map(d => d.prepayment);
-  const balance = data.map(d => d.balance);
+  
+  // Filter only EMI entries for chart data
+  const emiEntries = data.filter(d => d.type === 'EMI');
+  const prepaymentEntries = data.filter(d => d.type === 'Prepayment');
+  
+  const labels = emiEntries.map(d => `M${d.month}`);
+  const principalFromEmi = emiEntries.map(d => d.principalFromEmi || 0);
+  const interest = emiEntries.map(d => d.interest || 0);
+  const prepayments = emiEntries.map(d => {
+    const prepaymentInSameMonth = prepaymentEntries.find(p => p.month === d.month);
+    return prepaymentInSameMonth ? prepaymentInSameMonth.prepayment : 0;
+  });
+  const balance = emiEntries.map(d => d.balance || 0);
 
   if (barChart) barChart.destroy();
   if (lineChart) lineChart.destroy();
@@ -258,7 +300,7 @@ function renderCharts(data) {
       datasets: [
         { label: 'Principal from EMI', data: principalFromEmi, backgroundColor: '#60a5fa' },
         { label: 'Interest', data: interest, backgroundColor: '#fcd34d' },
-        { label: 'Prepayment', data: prepayment, backgroundColor: '#86efac' },
+        { label: 'Prepayment', data: prepayments, backgroundColor: '#86efac' },
       ]
     },
     options: { responsive: true, plugins: { legend: { display: true } } }
@@ -275,17 +317,16 @@ function renderCharts(data) {
 }
 
 function downloadCSV() {
-  let csv = 'Month,Scheduled EMI,Interest,Principal from EMI,Prepayment,Total Principal,Total Payment,Outstanding Balance\n';
+  let csv = 'Month,Type,Scheduled EMI,Interest,Principal from EMI,Prepayment,Total Payment,Outstanding Balance\n';
   schedule.value.forEach(r => {
-    const totalPrincipal = r.principalFromEmi + r.prepayment;
-    csv += `${r.month},${r.scheduledEmi.toFixed(2)},${r.interest.toFixed(2)},${r.principalFromEmi.toFixed(2)},${r.prepayment.toFixed(2)},${totalPrincipal.toFixed(2)},${r.totalPayment.toFixed(2)},${r.balance.toFixed(2)}\n`;
+    csv += `${r.month},${r.type},${r.scheduledEmi?.toFixed(2) || '0'},${r.interest?.toFixed(2) || '0'},${r.principalFromEmi?.toFixed(2) || '0'},${r.prepayment?.toFixed(2) || '0'},${r.totalPayment?.toFixed(2) || '0'},${r.balance?.toFixed(2) || '0'}\n`;
   });
 
   const blob = new Blob([csv], { type: 'text/csv' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'loan_amortization_schedule.csv';
+  a.download = 'full_loan_amortization_schedule.csv';
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -362,6 +403,9 @@ function downloadCSV() {
   font-size: 0.75rem;
 }
 .highlight-row {
+  background-color: #dcfce7;
+}
+.emi-row {
   background-color: #f0f9ff;
 }
 .prepayment-cell {
@@ -371,5 +415,9 @@ function downloadCSV() {
 .total-payment-cell {
   background-color: #fef3c7;
   font-weight: 600;
+}
+.type-cell {
+  font-weight: 600;
+  font-size: 0.75rem;
 }
 </style>
