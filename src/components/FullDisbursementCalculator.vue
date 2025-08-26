@@ -34,7 +34,7 @@
 
     <div class="mt-4">
       <label class="label">Lump Sum Payments (Recurring or One-Time)</label>
-      <div class="grid grid-cols-4 gap-4" v-for="(lump, index) in lumpSums" :key="index">
+      <div class="grid grid-cols-5 gap-4" v-for="(lump, index) in lumpSums" :key="index">
         <input v-model.number="lump.month" class="input" type="number" placeholder="Start Month" />
         <input v-model.number="lump.amount" class="input" type="number" placeholder="Amount" />
         <select v-model="lump.recurring" class="input">
@@ -42,6 +42,7 @@
           <option :value="true">Recurring</option>
         </select>
         <input v-if="lump.recurring" v-model.number="lump.repeat" class="input" type="number" placeholder="Repeat Every N Months" />
+        <button class="button delete-btn" @click="removeLumpSum(index)">Delete</button>
       </div>
       <button class="button" @click="addLumpSum">Add Lump Sum</button>
     </div>
@@ -51,7 +52,7 @@
     <div v-if="summary" class="summary-box">
       <div class="summary-item">Monthly EMI: ₹{{ summary.emi.toFixed(2) }}</div>
       <div class="summary-item">Total Interest: ₹{{ summary.totalInterest.toFixed(2) }}</div>
-      <div class="summary-item">Loan Duration: {{ summary.duration }} months</div>
+      <div class="summary-item">Loan Duration: {{ Math.floor(summary.duration / 12) }} years {{ summary.duration % 12 }} months ({{ summary.duration }} months)</div>
       <div class="summary-item">Months Saved: {{ summary.monthsSaved }}</div>
     </div>
 
@@ -72,23 +73,23 @@
       <thead>
         <tr>
           <th>Month</th>
-          <th>EMI</th>
-          <th>Principal</th>
+          <th>Scheduled EMI</th>
           <th>Interest</th>
-          <th>Extra</th>
-          <th>Lump Sum</th>
-          <th>Balance</th>
+          <th>Principal</th>
+          <th>Prepayment</th>
+          <th>Total Payment</th>
+          <th>Outstanding Balance</th>
         </tr>
       </thead>
       <tbody>
         <tr v-for="(item, idx) in schedule" :key="idx">
           <td>{{ item.month }}</td>
-          <td>{{ item.emi.toFixed(2) }}</td>
-          <td>{{ item.principal.toFixed(2) }}</td>
-          <td>{{ item.interest.toFixed(2) }}</td>
-          <td>{{ item.extra.toFixed(2) }}</td>
-          <td>{{ item.lump.toFixed(2) }}</td>
-          <td>{{ item.balance.toFixed(2) }}</td>
+          <td>₹{{ item.scheduledEmi.toFixed(2) }}</td>
+          <td>₹{{ item.interest.toFixed(2) }}</td>
+          <td>₹{{ item.principalFromEmi.toFixed(2) }}</td>
+          <td>₹{{ item.prepayment.toFixed(2) }}</td>
+          <td>₹{{ item.totalPayment.toFixed(2) }}</td>
+          <td>₹{{ item.balance.toFixed(2) }}</td>
         </tr>
       </tbody>
     </table>
@@ -115,6 +116,10 @@ function addLumpSum() {
   lumpSums.value.push({ month: 1, amount: 0, recurring: false, repeat: 0 });
 }
 
+function removeLumpSum(index) {
+  lumpSums.value.splice(index, 1);
+}
+
 function calculateEMI(P, N, R) {
   const r = R / 12 / 100;
   return P * r * Math.pow(1 + r, N) / (Math.pow(1 + r, N) - 1);
@@ -122,54 +127,84 @@ function calculateEMI(P, N, R) {
 
 function calculatePlan() {
   let balance = loanAmount.value;
-  const emi = calculateEMI(balance, loanTerm.value, interestRate.value);
+  const baseEmi = calculateEMI(balance, loanTerm.value, interestRate.value);
   const result = [];
   let totalInterest = 0;
   let month = 1;
 
- while (month <= loanTerm.value * 2 && balance > 0) {
-    const yearlyEMIBoost = Math.floor((month - 1) / 12) * (emiIncreaseRate.value / 100)
+  while (month <= loanTerm.value * 2 && balance > 0.01) {
     const r = interestRate.value / 12 / 100;
     const interest = balance * r;
-
-    let effectiveEmi = Math.max(emi, comfortableEmi.value)
-    effectiveEmi *= (1 + yearlyEMIBoost)
-
-    let principal = effectiveEmi - interest;
-    const extra = monthlyExtra.value;
-    let lump = 0;
-
+    
+    // Calculate EMI with yearly increase
+    const yearFromStart = Math.floor((month - 1) / 12);
+    const yearlyMultiplier = Math.pow(1 + (emiIncreaseRate.value / 100), yearFromStart);
+    const adjustedBaseEmi = baseEmi * yearlyMultiplier;
+    
+    // Calculate scheduled EMI principal component
+    const scheduledEmiPrincipal = Math.max(0, adjustedBaseEmi - interest);
+    
+    // Calculate comfortable EMI with yearly increase
+    let comfortableEmiAdjusted = comfortableEmi.value * yearlyMultiplier;
+    
+    // Calculate total available payment
+    let totalAvailablePayment = Math.max(adjustedBaseEmi, comfortableEmiAdjusted) + monthlyExtra.value;
+    
+    // Add lump sum payments
+    let lumpSum = 0;
     lumpSums.value.forEach(ls => {
-      if (ls.recurring && (month - ls.month) % ls.repeat === 0 && month >= ls.month) {
-        lump += ls.amount;
+      if (ls.recurring && month >= ls.month && ls.repeat > 0 && (month - ls.month) % ls.repeat === 0) {
+        lumpSum += ls.amount;
       } else if (!ls.recurring && ls.month === month) {
-        lump += ls.amount;
+        lumpSum += ls.amount;
       }
     });
-
-    if (principal + extra + lump > balance) {
-      principal = balance;
+    
+    totalAvailablePayment += lumpSum;
+    
+    // Calculate prepayment (amount above scheduled EMI)
+    const prepayment = Math.max(0, totalAvailablePayment - adjustedBaseEmi);
+    
+    // If remaining balance is less than total payment, adjust
+    if (totalAvailablePayment >= balance + interest) {
+      const finalPayment = balance + interest;
+      const finalPrincipal = balance;
+      
+      result.push({
+        month,
+        scheduledEmi: adjustedBaseEmi,
+        interest,
+        principalFromEmi: finalPrincipal,
+        prepayment: Math.max(0, finalPayment - adjustedBaseEmi),
+        totalPayment: finalPayment,
+        balance: 0,
+      });
+      
+      totalInterest += interest;
+      break;
     }
-
-    const totalPayment = principal + extra + lump;
-    balance -= totalPayment;
+    
+    // Normal case: apply scheduled principal + prepayment
+    const totalPrincipalPayment = scheduledEmiPrincipal + prepayment;
+    balance -= totalPrincipalPayment;
     totalInterest += interest;
-
+    
     result.push({
       month,
-      emi,
-      principal,
+      scheduledEmi: adjustedBaseEmi,
       interest,
-      extra,
-      lump,
+      principalFromEmi: scheduledEmiPrincipal,
+      prepayment,
+      totalPayment: interest + totalPrincipalPayment,
       balance: balance > 0 ? balance : 0,
     });
+    
     month++;
   }
 
   schedule.value = result;
   summary.value = {
-    emi,
+    emi: baseEmi,
     totalInterest,
     duration: result.length,
     monthsSaved: loanTerm.value - result.length
@@ -183,10 +218,9 @@ function renderCharts(data) {
   const ctx2 = document.getElementById('lineChart');
   const labels = data.map(d => `M${d.month}`);
 
-  const principal = data.map(d => d.principal);
+  const principalFromEmi = data.map(d => d.principalFromEmi);
   const interest = data.map(d => d.interest);
-  const extra = data.map(d => d.extra);
-  const lump = data.map(d => d.lump);
+  const prepayment = data.map(d => d.prepayment);
   const balance = data.map(d => d.balance);
 
   if (barChart) barChart.destroy();
@@ -197,29 +231,28 @@ function renderCharts(data) {
     data: {
       labels,
       datasets: [
-        { label: 'Principal', data: principal, backgroundColor: '#60a5fa' },
+        { label: 'Principal from EMI', data: principalFromEmi, backgroundColor: '#60a5fa' },
         { label: 'Interest', data: interest, backgroundColor: '#fcd34d' },
-        { label: 'Extra', data: extra, backgroundColor: '#86efac' },
-        { label: 'Lump Sum', data: lump, backgroundColor: '#f87171' },
+        { label: 'Prepayment', data: prepayment, backgroundColor: '#86efac' },
       ]
     },
-    options: { responsive: true, stacked: true }
+    options: { responsive: true, plugins: { legend: { display: true } } }
   });
 
   lineChart = new Chart(ctx2, {
     type: 'line',
     data: {
       labels,
-      datasets: [{ label: 'Outstanding Balance', data: balance, borderColor: '#7c3aed' }]
+      datasets: [{ label: 'Outstanding Balance', data: balance, borderColor: '#7c3aed', fill: false }]
     },
     options: { responsive: true }
   });
 }
 
 function downloadCSV() {
-  let csv = 'Month,EMI,Principal,Interest,Extra,Lump Sum,Balance\n';
+  let csv = 'Month,Scheduled EMI,Interest,Principal from EMI,Prepayment,Total Payment,Outstanding Balance\n';
   schedule.value.forEach(r => {
-    csv += `${r.month},${r.emi.toFixed(2)},${r.principal.toFixed(2)},${r.interest.toFixed(2)},${r.extra.toFixed(2)},${r.lump.toFixed(2)},${r.balance.toFixed(2)}\n`;
+    csv += `${r.month},${r.scheduledEmi.toFixed(2)},${r.interest.toFixed(2)},${r.principalFromEmi.toFixed(2)},${r.prepayment.toFixed(2)},${r.totalPayment.toFixed(2)},${r.balance.toFixed(2)}\n`;
   });
 
   const blob = new Blob([csv], { type: 'text/csv' });
@@ -294,5 +327,12 @@ function downloadCSV() {
   padding: 1rem;
   border-radius: 0.75rem;
   box-shadow: 0 0 5px rgba(0,0,0,0.05);
+}
+.delete-btn {
+  background-color: #ef4444;
+  color: white;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+  font-size: 0.75rem;
 }
 </style>
