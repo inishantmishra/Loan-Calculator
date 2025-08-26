@@ -151,10 +151,15 @@
       <div class="summary-item">
         <p><strong>Financial Summary</strong></p>
         <p>Total Interest Paid: {{ formatCurrency(summary.totalInterest || 0) }}</p>
-        <p>Interest Saved: {{ formatCurrency(summary.interestSaved || 0) }}</p>
+        <p v-if="summary.interestSaved > 0">Interest Saved: {{ formatCurrency(summary.interestSaved) }}</p>
         <p>Approved Loan: {{ formatCurrency(approvedLoanAmount) }}</p>
-        <p>Loan Used: {{ formatCurrency(totalBankLoanUsed) }}</p>
-        <p>Loan Remaining: {{ formatCurrency(approvedLoanAmount - totalBankLoanUsed) }}</p>
+        <p :class="{ 'text-red-600 font-bold': totalBankLoanUsed > approvedLoanAmount }">
+          Loan Used: {{ formatCurrency(totalBankLoanUsed) }}
+          <span v-if="totalBankLoanUsed > approvedLoanAmount" class="text-red-600"> ⚠️ EXCEEDS LIMIT!</span>
+        </p>
+        <p :class="{ 'text-red-600': totalBankLoanUsed > approvedLoanAmount }">
+          Loan Remaining: {{ formatCurrency(approvedLoanAmount - totalBankLoanUsed) }}
+        </p>
       </div>
       <div class="summary-item">
         <p><strong>Property Progress</strong></p>
@@ -370,6 +375,17 @@ const updatePhaseCalculations = (index) => {
     phase.selfContributionPercent = parseFloat(phase.selfContributionPercent) || 0
     phase.bankLoanPercent = parseFloat(phase.bankLoanPercent) || 0
     
+    // Validation: Check if bank loan exceeds approved limit
+    const currentTotal = totalBankLoanUsed.value - phase.bankLoanAmount + phase.bankLoanAmount
+    if (currentTotal > approvedLoanAmount.value) {
+      console.warn(`Bank loan amount exceeds approved limit. Total: ${currentTotal}, Approved: ${approvedLoanAmount.value}`)
+    }
+    
+    // Validation: Check if phase month is within loan term
+    if (phase.month > loanTerm.value || phase.month < 1) {
+      console.warn(`Phase month ${phase.month} is outside valid range (1-${loanTerm.value})`)
+    }
+    
   } catch (error) {
     console.error('Error in updatePhaseCalculations:', error)
     // Reset to safe defaults
@@ -402,6 +418,50 @@ const calculatePlan = () => {
     if (!disbursements.value.length || !totalFlatAmount.value || totalFlatAmount.value <= 0) {
       console.log('calculatePlan early exit:', { disbursements: disbursements.value.length, totalFlat: totalFlatAmount.value })
       return
+    }
+    
+    // Validation 1: Check for duplicate months
+    const months = disbursements.value.map(d => d.month).filter(m => m > 0)
+    const uniqueMonths = [...new Set(months)]
+    if (months.length !== uniqueMonths.length) {
+      console.error('Duplicate phase months detected:', months)
+      alert('Error: Multiple phases cannot be in the same month. Please use different months for each phase.')
+      return
+    }
+    
+    // Validation 2: Check total bank loan doesn't exceed approved amount
+    if (totalBankLoanUsed.value > approvedLoanAmount.value) {
+      console.error('Total bank loan exceeds approved amount:', { used: totalBankLoanUsed.value, approved: approvedLoanAmount.value })
+      alert(`Error: Total bank loan (₹${totalBankLoanUsed.value.toLocaleString()}) exceeds approved amount (₹${approvedLoanAmount.value.toLocaleString()})`)
+      return
+    }
+    
+    // Validation 3: Check all phase months are within loan term
+    const invalidMonths = disbursements.value.filter(d => d.month > loanTerm.value || d.month < 1)
+    if (invalidMonths.length > 0) {
+      console.error('Invalid phase months:', invalidMonths.map(d => d.month))
+      alert(`Error: Phase months must be between 1 and ${loanTerm.value}`)
+      return
+    }
+    
+    // Validation 4: Check for valid interest rate and loan term
+    if (interestRate.value <= 0 || interestRate.value > 50) {
+      console.error('Invalid interest rate:', interestRate.value)
+      alert('Error: Interest rate must be between 0.1% and 50%')
+      return
+    }
+    
+    if (loanTerm.value <= 0 || loanTerm.value > 600) {
+      console.error('Invalid loan term:', loanTerm.value)
+      alert('Error: Loan term must be between 1 and 600 months')
+      return
+    }
+    
+    // Validation 5: Check for phases with zero bank loan
+    const phasesWithoutLoan = disbursements.value.filter(d => (d.bankLoanAmount || 0) <= 0)
+    if (phasesWithoutLoan.length === disbursements.value.length) {
+      console.warn('No phases have bank loan amounts')
+      alert('Warning: No phases require bank loans. Please check your phase configurations.')
     }
     
     // Update all phase calculations first
@@ -475,9 +535,10 @@ const calculatePlan = () => {
       if (bankLoanAmount > 0) {
         currentLoanBalance += bankLoanAmount
         
-        // Recalculate TOTAL EMI for ALL outstanding loans with current remaining tenure
+        // Add the new phase EMI to the current total EMI (this is more realistic)
         const remainingTenure = Math.max(1, loanTerm.value - (month - 1))
-        currentTotalEMI = calculateEMI(currentLoanBalance, interestRate.value, remainingTenure)
+        const newPhaseEMI = calculateEMI(bankLoanAmount, interestRate.value, remainingTenure)
+        currentTotalEMI += newPhaseEMI
         
         console.log(`Month ${month} - New disbursement:`, {
           bankLoanAmount,
@@ -614,13 +675,30 @@ const calculatePlan = () => {
 
   // Calculate interest savings and final EMI properly
   const emiEntries = schedule.value.filter(s => s.type === 'EMI')
+  const prepaymentEntries = schedule.value.filter(s => s.type === 'Prepayment')
   const lastScheduleMonth = emiEntries.length > 0 ? 
     Math.max(...emiEntries.map(s => s.month)) : 0
     
-  // Calculate what the original total interest would have been if all loans were taken at month 1
-  const originalTotalInterest = cumulativeBankLoanDisbursed > 0 ? 
-    (calculateEMI(cumulativeBankLoanDisbursed, interestRate.value, loanTerm.value) * loanTerm.value) - cumulativeBankLoanDisbursed : 0
-  const interestSaved = Math.max(0, originalTotalInterest - totalInterest)
+  // Calculate interest saved ONLY if there are actual prepayments
+  let interestSaved = 0
+  if (prepaymentEntries.length > 0 || comfortableEmi.value > 0 || monthlyExtra.value > 0) {
+    // Calculate what interest would have been without any prepayments
+    // This means calculating EMI for each phase without extra payments
+    let originalTotalInterest = 0
+    let tempBalance = 0
+    let tempMonth = 1
+    
+    // Simulate loan without prepayments
+    for (const phase of sortedDisbursements) {
+      if (phase.bankLoanAmount > 0) {
+        const remainingTenure = Math.max(1, loanTerm.value - (phase.month - 1))
+        const phaseEMI = calculateEMI(phase.bankLoanAmount, interestRate.value, remainingTenure)
+        originalTotalInterest += (phaseEMI * remainingTenure) - phase.bankLoanAmount
+      }
+    }
+    
+    interestSaved = Math.max(0, originalTotalInterest - totalInterest)
+  }
   
   // Find the final combined EMI from the last EMI entry
   const finalCombinedEMI = emiEntries.length > 0 ? 
@@ -757,18 +835,30 @@ const drawCharts = () => {
 }
 
 const downloadCSV = () => {
+  if (!schedule.value || schedule.value.length === 0) {
+    alert('No schedule data to download. Please calculate the plan first.')
+    return
+  }
+  
   let csv = 'Month,Type,Scheduled EMI,Interest,Principal from EMI,Prepayment,Total Payment,Outstanding Balance\n'
   schedule.value.forEach(r => {
-    csv += `${r.month},${r.type},${r.scheduledEmi?.toFixed(2) || '0'},${r.interest?.toFixed(2) || '0'},${r.principalFromEmi?.toFixed(2) || '0'},${r.prepayment?.toFixed(2) || '0'},${r.totalPayment?.toFixed(2) || '0'},${r.balance?.toFixed(2) || '0'}\n`
+    if (r && typeof r === 'object') {
+      csv += `${r.month || 0},${r.type || 'Unknown'},${r.scheduledEmi?.toFixed(2) || '0'},${r.interest?.toFixed(2) || '0'},${r.principalFromEmi?.toFixed(2) || '0'},${r.prepayment?.toFixed(2) || '0'},${r.totalPayment?.toFixed(2) || '0'},${r.balance?.toFixed(2) || '0'}\n`
+    }
   })
 
-  const blob = new Blob([csv], { type: 'text/csv' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = 'phased_loan_schedule.csv'
-  a.click()
-  URL.revokeObjectURL(url)
+  try {
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'phased_loan_schedule.csv'
+    a.click()
+    URL.revokeObjectURL(url)
+  } catch (error) {
+    console.error('Error downloading CSV:', error)
+    alert('Error creating CSV file. Please try again.')
+  }
 }
 </script>
 
