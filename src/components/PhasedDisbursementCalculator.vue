@@ -51,7 +51,7 @@
               class="input" 
               type="number" 
               :placeholder="inputMode === 'percentage' ? 'Builder %' : 'Amount'" 
-              @input="updatePhaseCalculations(index)"
+              @input="handlePhaseInput(index)"
             />
           </div>
           <div>
@@ -61,7 +61,7 @@
               class="input" 
               type="number" 
               :placeholder="inputMode === 'percentage' ? 'Self %' : 'Amount'" 
-              @input="updatePhaseCalculations(index)"
+              @input="handlePhaseInput(index)"
             />
           </div>
           <div>
@@ -78,9 +78,9 @@
         </div>
         <div class="phase-info mt-2" v-if="totalFlatAmount > 0">
           <div class="info-grid">
-            <span><strong>Builder:</strong> {{ formatCurrency(phase.builderDemandAmount) }} ({{ phase.builderDemandPercent?.toFixed(1) }}%)</span>
-            <span><strong>Self:</strong> {{ formatCurrency(phase.selfContributionAmount) }} ({{ phase.selfContributionPercent?.toFixed(1) }}%)</span>
-            <span><strong>Bank:</strong> {{ formatCurrency(phase.bankLoanAmount) }} ({{ phase.bankLoanPercent?.toFixed(1) }}%)</span>
+            <span><strong>Builder:</strong> {{ formatCurrency(phase.builderDemandAmount || 0) }} ({{ (phase.builderDemandPercent || 0).toFixed(1) }}%)</span>
+            <span><strong>Self:</strong> {{ formatCurrency(phase.selfContributionAmount || 0) }} ({{ (phase.selfContributionPercent || 0).toFixed(1) }}%)</span>
+            <span><strong>Bank:</strong> {{ formatCurrency(phase.bankLoanAmount || 0) }} ({{ (phase.bankLoanPercent || 0).toFixed(1) }}%)</span>
           </div>
         </div>
       </div>
@@ -231,15 +231,27 @@ const disbursements = ref([{
 }])
 
 const totalPhasePercentage = computed(() => {
-  return disbursements.value.reduce((sum, phase) => {
-    return sum + (phase.builderDemandPercent || 0)
-  }, 0)
+  try {
+    return disbursements.value.reduce((sum, phase) => {
+      const percentage = parseFloat(phase.builderDemandPercent) || 0
+      return sum + percentage
+    }, 0)
+  } catch (error) {
+    console.error('Error calculating totalPhasePercentage:', error)
+    return 0
+  }
 })
 
 const totalBankLoanUsed = computed(() => {
-  return disbursements.value.reduce((sum, phase) => {
-    return sum + (phase.bankLoanAmount || 0)
-  }, 0)
+  try {
+    return disbursements.value.reduce((sum, phase) => {
+      const amount = parseFloat(phase.bankLoanAmount) || 0
+      return sum + amount
+    }, 0)
+  } catch (error) {
+    console.error('Error calculating totalBankLoanUsed:', error)
+    return 0
+  }
 })
 const lumpSums = ref([])
 const phaseSummaries = ref([])
@@ -247,10 +259,10 @@ const schedule = ref([])
 const summary = ref(null)
 
 const addDisbursement = () => {
-  disbursements.value.push({
+  const newPhase = {
     month: 1,
-    builderDemand: 0,
-    selfContribution: 0,
+    builderDemand: '',
+    selfContribution: '',
     bankLoan: 0,
     builderDemandAmount: 0,
     selfContributionAmount: 0,
@@ -258,7 +270,13 @@ const addDisbursement = () => {
     builderDemandPercent: 0,
     selfContributionPercent: 0,
     bankLoanPercent: 0
-  })
+  }
+  disbursements.value.push(newPhase)
+  
+  // Initialize calculations after adding
+  setTimeout(() => {
+    updatePhaseCalculations(disbursements.value.length - 1)
+  }, 0)
 }
 
 const removeDisbursement = (index) => {
@@ -285,48 +303,87 @@ const formatCurrency = (amount) => {
 
 const updatePhaseCalculations = (index) => {
   const phase = disbursements.value[index]
-  if (!totalFlatAmount.value) return
+  if (!totalFlatAmount.value || !phase) return
   
-  if (inputMode.value === 'percentage') {
-    // Convert percentages to amounts
-    phase.builderDemandAmount = (phase.builderDemand / 100) * totalFlatAmount.value
-    phase.selfContributionAmount = (phase.selfContribution / 100) * totalFlatAmount.value
-    phase.bankLoanAmount = phase.builderDemandAmount - phase.selfContributionAmount
-    
-    // Update percentage fields
-    phase.builderDemandPercent = phase.builderDemand
-    phase.selfContributionPercent = phase.selfContribution
-    phase.bankLoanPercent = (phase.bankLoanAmount / totalFlatAmount.value) * 100
-    phase.bankLoan = phase.bankLoanPercent
-  } else {
-    // Convert amounts to percentages
-    phase.builderDemandAmount = phase.builderDemand
-    phase.selfContributionAmount = phase.selfContribution
-    phase.bankLoanAmount = phase.builderDemandAmount - phase.selfContributionAmount
-    
-    // Update amount fields
-    phase.builderDemandPercent = (phase.builderDemandAmount / totalFlatAmount.value) * 100
-    phase.selfContributionPercent = (phase.selfContributionAmount / totalFlatAmount.value) * 100
-    phase.bankLoanPercent = (phase.bankLoanAmount / totalFlatAmount.value) * 100
-    phase.bankLoan = phase.bankLoanAmount
-  }
+  // Initialize values if undefined or null
+  const builderDemand = parseFloat(phase.builderDemand) || 0
+  const selfContribution = parseFloat(phase.selfContribution) || 0
   
-  // Ensure bank loan is not negative
-  if (phase.bankLoanAmount < 0) {
+  try {
+    if (inputMode.value === 'percentage') {
+      // Convert percentages to amounts
+      phase.builderDemandAmount = (builderDemand / 100) * totalFlatAmount.value
+      phase.selfContributionAmount = (selfContribution / 100) * totalFlatAmount.value
+      phase.bankLoanAmount = Math.max(0, phase.builderDemandAmount - phase.selfContributionAmount)
+      
+      // Update percentage fields
+      phase.builderDemandPercent = builderDemand
+      phase.selfContributionPercent = selfContribution
+      phase.bankLoanPercent = totalFlatAmount.value > 0 ? (phase.bankLoanAmount / totalFlatAmount.value) * 100 : 0
+      phase.bankLoan = phase.bankLoanPercent
+    } else {
+      // Convert amounts to percentages
+      phase.builderDemandAmount = builderDemand
+      phase.selfContributionAmount = selfContribution
+      phase.bankLoanAmount = Math.max(0, phase.builderDemandAmount - phase.selfContributionAmount)
+      
+      // Update percentage fields
+      phase.builderDemandPercent = totalFlatAmount.value > 0 ? (phase.builderDemandAmount / totalFlatAmount.value) * 100 : 0
+      phase.selfContributionPercent = totalFlatAmount.value > 0 ? (phase.selfContributionAmount / totalFlatAmount.value) * 100 : 0
+      phase.bankLoanPercent = totalFlatAmount.value > 0 ? (phase.bankLoanAmount / totalFlatAmount.value) * 100 : 0
+      phase.bankLoan = phase.bankLoanAmount
+    }
+    
+    // Ensure all calculated values are numbers
+    phase.builderDemandAmount = parseFloat(phase.builderDemandAmount) || 0
+    phase.selfContributionAmount = parseFloat(phase.selfContributionAmount) || 0
+    phase.bankLoanAmount = parseFloat(phase.bankLoanAmount) || 0
+    phase.builderDemandPercent = parseFloat(phase.builderDemandPercent) || 0
+    phase.selfContributionPercent = parseFloat(phase.selfContributionPercent) || 0
+    phase.bankLoanPercent = parseFloat(phase.bankLoanPercent) || 0
+    
+  } catch (error) {
+    console.error('Error in updatePhaseCalculations:', error)
+    // Reset to safe defaults
+    phase.builderDemandAmount = 0
+    phase.selfContributionAmount = 0
     phase.bankLoanAmount = 0
+    phase.builderDemandPercent = 0
+    phase.selfContributionPercent = 0
     phase.bankLoanPercent = 0
     phase.bankLoan = 0
   }
 }
 
+const handlePhaseInput = (index) => {
+  try {
+    // Add a small delay to allow the input to be processed
+    setTimeout(() => {
+      updatePhaseCalculations(index)
+    }, 10)
+  } catch (error) {
+    console.error('Error handling phase input:', error)
+  }
+}
+
 const calculatePlan = () => {
-  schedule.value = []
-  phaseSummaries.value = []
-  
-  if (!disbursements.value.length || !totalFlatAmount.value) return
-  
-  // Sort disbursements by month
-  const sortedDisbursements = [...disbursements.value].sort((a, b) => a.month - b.month)
+  try {
+    schedule.value = []
+    phaseSummaries.value = []
+    
+    if (!disbursements.value.length || !totalFlatAmount.value) return
+    
+    // Update all phase calculations first and validate
+    disbursements.value.forEach((_, index) => {
+      try {
+        updatePhaseCalculations(index)
+      } catch (error) {
+        console.error(`Error updating phase ${index + 1}:`, error)
+      }
+    })
+    
+    // Sort disbursements by month
+    const sortedDisbursements = [...disbursements.value].sort((a, b) => (a.month || 1) - (b.month || 1))
   
   let totalInterest = 0
   let month = 1
@@ -514,49 +571,65 @@ const calculatePlan = () => {
     totalPaid: cumulativeTotalPaid
   }
 
-  drawCharts()
+    drawCharts()
+  } catch (error) {
+    console.error('Error in calculatePlan:', error)
+    // Reset to safe state
+    schedule.value = []
+    phaseSummaries.value = []
+    summary.value = null
+  }
 }
 
 const drawCharts = () => {
-  const barCtx = document.getElementById('barChart')
-  const lineCtx = document.getElementById('lineChart')
-  if (barCtx.chart) barCtx.chart.destroy()
-  if (lineCtx.chart) lineCtx.chart.destroy()
+  try {
+    const barCtx = document.getElementById('barChart')
+    const lineCtx = document.getElementById('lineChart')
+    
+    if (!barCtx || !lineCtx) return
+    
+    if (barCtx.chart) barCtx.chart.destroy()
+    if (lineCtx.chart) lineCtx.chart.destroy()
 
-  // Filter only EMI entries for chart data
-  const emiEntries = schedule.value.filter(x => x.type === 'EMI')
-  const prepaymentEntries = schedule.value.filter(x => x.type === 'Prepayment')
-  
-  const months = emiEntries.map(x => `M${x.month}`)
-  const principalFromEmi = emiEntries.map(x => x.principalFromEmi || 0)
-  const interest = emiEntries.map(x => x.interest || 0)
-  const prepayments = emiEntries.map(x => {
-    const prepaymentInSameMonth = prepaymentEntries.find(p => p.month === x.month)
-    return prepaymentInSameMonth ? prepaymentInSameMonth.prepayment : 0
-  })
-  const balances = emiEntries.map(x => x.balance || 0)
+    // Filter only EMI entries for chart data
+    const emiEntries = schedule.value.filter(x => x && x.type === 'EMI')
+    const prepaymentEntries = schedule.value.filter(x => x && x.type === 'Prepayment')
+    
+    if (emiEntries.length === 0) return
+    
+    const months = emiEntries.map(x => `M${x.month || 0}`)
+    const principalFromEmi = emiEntries.map(x => parseFloat(x.principalFromEmi) || 0)
+    const interest = emiEntries.map(x => parseFloat(x.interest) || 0)
+    const prepayments = emiEntries.map(x => {
+      const prepaymentInSameMonth = prepaymentEntries.find(p => p.month === x.month)
+      return prepaymentInSameMonth ? (parseFloat(prepaymentInSameMonth.prepayment) || 0) : 0
+    })
+    const balances = emiEntries.map(x => parseFloat(x.balance) || 0)
 
-  barCtx.chart = new Chart(barCtx, {
-    type: 'bar',
-    data: {
-      labels: months,
-      datasets: [
-        { label: 'Principal from EMI', data: principalFromEmi, backgroundColor: '#60a5fa' },
-        { label: 'Interest', data: interest, backgroundColor: '#fcd34d' },
-        { label: 'Prepayment', data: prepayments, backgroundColor: '#86efac' }
-      ]
-    },
-    options: { responsive: true, plugins: { legend: { position: 'top' } } }
-  })
+    barCtx.chart = new Chart(barCtx, {
+      type: 'bar',
+      data: {
+        labels: months,
+        datasets: [
+          { label: 'Principal from EMI', data: principalFromEmi, backgroundColor: '#60a5fa' },
+          { label: 'Interest', data: interest, backgroundColor: '#fcd34d' },
+          { label: 'Prepayment', data: prepayments, backgroundColor: '#86efac' }
+        ]
+      },
+      options: { responsive: true, plugins: { legend: { position: 'top' } } }
+    })
 
-  lineCtx.chart = new Chart(lineCtx, {
-    type: 'line',
-    data: {
-      labels: months,
-      datasets: [{ label: 'Outstanding Balance', data: balances, borderColor: '#7c3aed', borderWidth: 2, fill: false }]
-    },
-    options: { responsive: true, plugins: { legend: { position: 'top' } } }
-  })
+    lineCtx.chart = new Chart(lineCtx, {
+      type: 'line',
+      data: {
+        labels: months,
+        datasets: [{ label: 'Outstanding Balance', data: balances, borderColor: '#7c3aed', borderWidth: 2, fill: false }]
+      },
+      options: { responsive: true, plugins: { legend: { position: 'top' } } }
+    })
+  } catch (error) {
+    console.error('Error in drawCharts:', error)
+  }
 }
 
 const downloadCSV = () => {
