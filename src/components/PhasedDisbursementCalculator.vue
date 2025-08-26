@@ -544,7 +544,8 @@ const calculatePlan = () => {
           bankLoanAmount,
           currentLoanBalance,
           remainingTenure,
-          recalculatedTotalEMI: currentTotalEMI
+          newPhaseEMI,
+          currentTotalEMI
         })
       }
     }
@@ -681,12 +682,11 @@ const calculatePlan = () => {
     
   // Calculate interest saved ONLY if there are actual prepayments
   let interestSaved = 0
+  let originalTotalInterest = 0
+  
   if (prepaymentEntries.length > 0 || comfortableEmi.value > 0 || monthlyExtra.value > 0) {
     // Calculate what interest would have been without any prepayments
     // This means calculating EMI for each phase without extra payments
-    let originalTotalInterest = 0
-    let tempBalance = 0
-    let tempMonth = 1
     
     // Simulate loan without prepayments
     for (const phase of sortedDisbursements) {
