@@ -17,7 +17,8 @@
       "Bash(del test-results.json)",
       "Bash(del phased-calculator-results.png)",
       "WebFetch(domain:localhost)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(cp:*)"
     ],
     "deny": [],
     "ask": []
