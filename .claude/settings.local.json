@@ -18,7 +18,10 @@
       "Bash(del phased-calculator-results.png)",
       "WebFetch(domain:localhost)",
       "Bash(curl:*)",
-      "Bash(cp:*)"
+      "Bash(cp:*)",
+      "Bash(del test-mobile-flickering.js)",
+      "Bash(del test-mobile-flickering-fixed.js)",
+      "Bash(del test-comprehensive-fix.js)"
     ],
     "deny": [],
     "ask": []
