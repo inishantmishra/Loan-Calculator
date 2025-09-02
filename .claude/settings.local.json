@@ -21,7 +21,10 @@
       "Bash(cp:*)",
       "Bash(del test-mobile-flickering.js)",
       "Bash(del test-mobile-flickering-fixed.js)",
-      "Bash(del test-comprehensive-fix.js)"
+      "Bash(del test-comprehensive-fix.js)",
+      "Bash(npx playwright:*)",
+      "Bash(del test-phase-values.js page-structure.png phased-disbursement-page.png)",
+      "Read(c:\\Users\\Anil\\Pictures/**)"
     ],
     "deny": [],
     "ask": []

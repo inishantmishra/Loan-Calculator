@@ -39,41 +39,60 @@
           <h3 class="font-medium">Phase {{ index + 1 }}</h3>
           <button class="button delete-btn" @click="removeDisbursement(index)">Delete</button>
         </div>
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mt-2">
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mt-2">
           <div>
             <label class="label-sm">Month</label>
             <input v-model.number="phase.month" class="input" type="number" placeholder="Month" />
           </div>
-          <div>
-            <label class="label-sm">Builder Demand ({{ inputMode === 'percentage' ? '%' : '₹' }})</label>
-            <input 
-              v-model.number="phase.builderDemand" 
-              class="input" 
-              type="number" 
-              :placeholder="inputMode === 'percentage' ? 'Builder %' : 'Amount'" 
-              @input="handlePhaseInput(index)"
-            />
+          <div class="flex flex-col">
+            <label class="label-sm">Builder Demand ({{ phase.builderInputMode === 'percentage' ? '%' : '₹' }})</label>
+            <div class="flex gap-1">
+              <input 
+                :value="phase.builderDemand" 
+                @input="(e) => { phase.builderDemand = parseFloat(e.target.value) || 0; handlePhaseInput(index) }"
+                class="input input-wide" 
+                type="number" 
+                :placeholder="phase.builderInputMode === 'percentage' ? 'Builder %' : 'Amount'" 
+              />
+              <select v-model="phase.builderInputMode" class="input input-dropdown" @change="handlePhaseInput(index)">
+                <option value="percentage">%</option>
+                <option value="amount">₹</option>
+              </select>
+            </div>
           </div>
-          <div>
-            <label class="label-sm">Self Contribution ({{ inputMode === 'percentage' ? '%' : '₹' }})</label>
-            <input 
-              v-model.number="phase.selfContribution" 
-              class="input" 
-              type="number" 
-              :placeholder="inputMode === 'percentage' ? 'Self %' : 'Amount'" 
-              @input="handlePhaseInput(index)"
-            />
+          <div class="flex flex-col">
+            <label class="label-sm">Self Contribution ({{ phase.selfInputMode === 'percentage' ? '%' : '₹' }})</label>
+            <div class="flex gap-1">
+              <input 
+                :value="phase.selfContribution" 
+                @input="(e) => { if (index !== 0) { phase.selfContribution = parseFloat(e.target.value) || 0; handlePhaseInput(index) } }"
+                class="input input-wide" 
+                type="number" 
+                :placeholder="phase.selfInputMode === 'percentage' ? 'Self %' : 'Amount'" 
+                :readonly="index === 0"
+                :class="{ 'readonly-input': index === 0 }"
+              />
+              <select v-model="phase.selfInputMode" class="input input-dropdown" @change="handlePhaseInput(index)">
+                <option value="percentage">%</option>
+                <option value="amount">₹</option>
+              </select>
+            </div>
           </div>
-          <div>
-            <label class="label-sm">Bank Loan ({{ inputMode === 'percentage' ? '%' : '₹' }})</label>
-            <input 
-              v-model.number="phase.bankLoan" 
-              class="input" 
-              type="number" 
-              :placeholder="inputMode === 'percentage' ? 'Bank %' : 'Amount'" 
-              readonly
-              :class="'readonly-input'"
-            />
+          <div class="flex flex-col">
+            <label class="label-sm">Bank Loan ({{ phase.bankInputMode === 'percentage' ? '%' : '₹' }})</label>
+            <div class="flex gap-1">
+              <input 
+                :value="phase.bankLoan" 
+                class="input input-wide readonly-input" 
+                type="number" 
+                :placeholder="phase.bankInputMode === 'percentage' ? 'Bank %' : 'Amount'" 
+                readonly
+              />
+              <select v-model="phase.bankInputMode" class="input input-dropdown readonly-input" disabled>
+                <option value="percentage">%</option>
+                <option value="amount">₹</option>
+              </select>
+            </div>
           </div>
         </div>
         <div class="phase-info mt-2" v-if="totalFlatAmount > 0">
@@ -81,6 +100,13 @@
             <span><strong>Builder:</strong> {{ formatCurrency(phase.builderDemandAmount || 0) }} ({{ (phase.builderDemandPercent || 0).toFixed(1) }}%)</span>
             <span><strong>Self:</strong> {{ formatCurrency(phase.selfContributionAmount || 0) }} ({{ (phase.selfContributionPercent || 0).toFixed(1) }}%)</span>
             <span><strong>Bank:</strong> {{ formatCurrency(phase.bankLoanAmount || 0) }} ({{ (phase.bankLoanPercent || 0).toFixed(1) }}%)</span>
+          </div>
+          <div class="cumulative-info mt-2 pt-2 border-t border-gray-300">
+            <div class="text-sm font-medium text-gray-700 mb-1">Cumulative up to this phase:</div>
+            <div class="cumulative-grid">
+              <span class="text-blue-600"><strong>Total Self:</strong> {{ getCumulativeSelfPercent(index).toFixed(1) }}% ({{ formatCurrency(getCumulativeSelfAmount(index)) }})</span>
+              <span class="text-green-600"><strong>Total Bank:</strong> {{ getCumulativeBankPercent(index).toFixed(1) }}% ({{ formatCurrency(getCumulativeBankAmount(index)) }})</span>
+            </div>
           </div>
         </div>
       </div>
@@ -212,54 +238,168 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import Chart from 'chart.js/auto'
 
-const totalFlatAmount = ref(22500000)
-const approvedLoanAmount = ref(16875000)
+const totalFlatAmount = ref(24150000)
+const approvedLoanAmount = ref(18112500)
 const loanTerm = ref(240)
 const interestRate = ref(7.1)
-const comfortableEmi = ref(0)
+const comfortableEmi = ref(100000)
 const monthlyExtra = ref(0)
 const emiIncreaseRate = ref(0)
 const inputMode = ref('percentage')
 
 const disbursements = ref([
   { 
+    month: 0, 
+    builderDemand: 0, 
+    selfContribution: 500000, 
+    bankLoan: 0,
+    builderDemandAmount: 0,
+    selfContributionAmount: 500000,
+    bankLoanAmount: 0,
+    builderDemandPercent: 0,
+    selfContributionPercent: 2.1,
+    bankLoanPercent: 0,
+    builderInputMode: 'amount',
+    selfInputMode: 'amount',
+    bankInputMode: 'amount'
+  },
+  { 
     month: 1, 
-    builderDemand: 35, 
-    selfContribution: 18, 
-    bankLoan: 17,
-    builderDemandAmount: 7875000,
-    selfContributionAmount: 4050000,
-    bankLoanAmount: 3825000,
-    builderDemandPercent: 35,
-    selfContributionPercent: 18,
-    bankLoanPercent: 17
+    builderDemand: 10, 
+    selfContribution: 0, 
+    bankLoan: 10,
+    builderDemandAmount: 2415000,
+    selfContributionAmount: 0,
+    bankLoanAmount: 2415000,
+    builderDemandPercent: 10,
+    selfContributionPercent: 0,
+    bankLoanPercent: 10,
+    builderInputMode: 'percentage',
+    selfInputMode: 'percentage',
+    bankInputMode: 'percentage'
   },
   { 
-    month: 24, 
-    builderDemand: 35, 
-    selfContribution: 3, 
-    bankLoan: 32,
-    builderDemandAmount: 7875000,
-    selfContributionAmount: 675000,
-    bankLoanAmount: 7200000,
-    builderDemandPercent: 35,
-    selfContributionPercent: 3,
-    bankLoanPercent: 32
+    month: 2, 
+    builderDemand: 15, 
+    selfContribution: 0, 
+    bankLoan: 15,
+    builderDemandAmount: 3622500,
+    selfContributionAmount: 0,
+    bankLoanAmount: 3622500,
+    builderDemandPercent: 15,
+    selfContributionPercent: 0,
+    bankLoanPercent: 15,
+    builderInputMode: 'percentage',
+    selfInputMode: 'percentage',
+    bankInputMode: 'percentage'
   },
   { 
-    month: 48, 
-    builderDemand: 30, 
-    selfContribution: 4, 
-    bankLoan: 26,
-    builderDemandAmount: 6750000,
-    selfContributionAmount: 900000,
-    bankLoanAmount: 5850000,
-    builderDemandPercent: 30,
-    selfContributionPercent: 4,
-    bankLoanPercent: 26
+    month: 3, 
+    builderDemand: 15, 
+    selfContribution: 0, 
+    bankLoan: 15,
+    builderDemandAmount: 3622500,
+    selfContributionAmount: 0,
+    bankLoanAmount: 3622500,
+    builderDemandPercent: 15,
+    selfContributionPercent: 0,
+    bankLoanPercent: 15,
+    builderInputMode: 'percentage',
+    selfInputMode: 'percentage',
+    bankInputMode: 'percentage'
+  },
+  { 
+    month: 4, 
+    builderDemand: 12.5, 
+    selfContribution: 0, 
+    bankLoan: 12.5,
+    builderDemandAmount: 3018750,
+    selfContributionAmount: 0,
+    bankLoanAmount: 3018750,
+    builderDemandPercent: 12.5,
+    selfContributionPercent: 0,
+    bankLoanPercent: 12.5,
+    builderInputMode: 'percentage',
+    selfInputMode: 'percentage',
+    bankInputMode: 'percentage'
+  },
+  { 
+    month: 5, 
+    builderDemand: 12.5, 
+    selfContribution: 0, 
+    bankLoan: 12.5,
+    builderDemandAmount: 3018750,
+    selfContributionAmount: 0,
+    bankLoanAmount: 3018750,
+    builderDemandPercent: 12.5,
+    selfContributionPercent: 0,
+    bankLoanPercent: 12.5,
+    builderInputMode: 'percentage',
+    selfInputMode: 'percentage',
+    bankInputMode: 'percentage'
+  },
+  { 
+    month: 6, 
+    builderDemand: 10, 
+    selfContribution: 0, 
+    bankLoan: 10,
+    builderDemandAmount: 2415000,
+    selfContributionAmount: 0,
+    bankLoanAmount: 2415000,
+    builderDemandPercent: 10,
+    selfContributionPercent: 0,
+    bankLoanPercent: 10,
+    builderInputMode: 'percentage',
+    selfInputMode: 'percentage',
+    bankInputMode: 'percentage'
+  },
+  { 
+    month: 7, 
+    builderDemand: 10, 
+    selfContribution: 0, 
+    bankLoan: 10,
+    builderDemandAmount: 2415000,
+    selfContributionAmount: 0,
+    bankLoanAmount: 2415000,
+    builderDemandPercent: 10,
+    selfContributionPercent: 0,
+    bankLoanPercent: 10,
+    builderInputMode: 'percentage',
+    selfInputMode: 'percentage',
+    bankInputMode: 'percentage'
+  },
+  { 
+    month: 8, 
+    builderDemand: 10, 
+    selfContribution: 0, 
+    bankLoan: 10,
+    builderDemandAmount: 2415000,
+    selfContributionAmount: 0,
+    bankLoanAmount: 2415000,
+    builderDemandPercent: 10,
+    selfContributionPercent: 0,
+    bankLoanPercent: 10,
+    builderInputMode: 'percentage',
+    selfInputMode: 'percentage',
+    bankInputMode: 'percentage'
+  },
+  { 
+    month: 9, 
+    builderDemand: 5, 
+    selfContribution: 0, 
+    bankLoan: 5,
+    builderDemandAmount: 1207500,
+    selfContributionAmount: 0,
+    bankLoanAmount: 1207500,
+    builderDemandPercent: 5,
+    selfContributionPercent: 0,
+    bankLoanPercent: 5,
+    builderInputMode: 'percentage',
+    selfInputMode: 'percentage',
+    bankInputMode: 'percentage'
   }
 ])
 
@@ -291,6 +431,28 @@ const phaseSummaries = ref([])
 const schedule = ref([])
 const summary = ref(null)
 
+const getCumulativeSelfAmount = (upToIndex) => {
+  return disbursements.value.slice(0, upToIndex + 1).reduce((sum, phase) => {
+    return sum + (phase.selfContributionAmount || 0)
+  }, 0)
+}
+
+const getCumulativeBankAmount = (upToIndex) => {
+  return disbursements.value.slice(0, upToIndex + 1).reduce((sum, phase) => {
+    return sum + (phase.bankLoanAmount || 0)
+  }, 0)
+}
+
+const getCumulativeSelfPercent = (upToIndex) => {
+  const amount = getCumulativeSelfAmount(upToIndex)
+  return totalFlatAmount.value > 0 ? (amount / totalFlatAmount.value) * 100 : 0
+}
+
+const getCumulativeBankPercent = (upToIndex) => {
+  const amount = getCumulativeBankAmount(upToIndex)
+  return totalFlatAmount.value > 0 ? (amount / totalFlatAmount.value) * 100 : 0
+}
+
 const addDisbursement = () => {
   const newPhase = {
     month: 1,
@@ -302,7 +464,10 @@ const addDisbursement = () => {
     bankLoanAmount: 0,
     builderDemandPercent: 0,
     selfContributionPercent: 0,
-    bankLoanPercent: 0
+    bankLoanPercent: 0,
+    builderInputMode: 'percentage',
+    selfInputMode: 'percentage',
+    bankInputMode: 'percentage'
   }
   disbursements.value.push(newPhase)
   
@@ -338,32 +503,70 @@ const updatePhaseCalculations = (index) => {
   const phase = disbursements.value[index]
   if (!totalFlatAmount.value || !phase) return
   
+  // Special handling for Phase 0 (Application money) - fixed amount
+  if (index === 0) {
+    phase.builderDemandAmount = 0
+    phase.selfContributionAmount = 500000 // Fixed 5L amount
+    phase.bankLoanAmount = 0
+    phase.builderDemandPercent = 0
+    phase.selfContributionPercent = totalFlatAmount.value > 0 ? (500000 / totalFlatAmount.value) * 100 : 0
+    phase.bankLoanPercent = 0
+    // Ensure the input fields show the correct values
+    phase.builderDemand = 0
+    phase.selfContribution = 500000 // This should show 500000 in the input
+    phase.bankLoan = 0
+    return
+  }
+  
+  // For other phases, only skip if BOTH values are truly empty (not zero)
+  // This prevents overwriting the initial percentage values
+  if ((phase.builderDemand === '' || phase.builderDemand === null || phase.builderDemand === undefined) && 
+      (phase.selfContribution === '' || phase.selfContribution === null || phase.selfContribution === undefined)) {
+    // But still calculate amounts for display purposes if we have valid input mode and flat amount
+    if (phase.builderInputMode && phase.selfInputMode) {
+      // Calculate amounts for display even if inputs are empty
+      phase.builderDemandAmount = 0
+      phase.selfContributionAmount = 0
+      phase.bankLoanAmount = 0
+      phase.builderDemandPercent = 0
+      phase.selfContributionPercent = 0
+      phase.bankLoanPercent = 0
+      phase.bankLoan = 0
+    }
+    return
+  }
+  
   // Initialize values if undefined or null
   const builderDemand = parseFloat(phase.builderDemand) || 0
   const selfContribution = parseFloat(phase.selfContribution) || 0
   
   try {
-    if (inputMode.value === 'percentage') {
-      // Convert percentages to amounts
+    // Handle builder demand based on its input mode
+    if (phase.builderInputMode === 'percentage') {
       phase.builderDemandAmount = (builderDemand / 100) * totalFlatAmount.value
-      phase.selfContributionAmount = (selfContribution / 100) * totalFlatAmount.value
-      phase.bankLoanAmount = Math.max(0, phase.builderDemandAmount - phase.selfContributionAmount)
-      
-      // Update percentage fields
       phase.builderDemandPercent = builderDemand
-      phase.selfContributionPercent = selfContribution
-      phase.bankLoanPercent = totalFlatAmount.value > 0 ? (phase.bankLoanAmount / totalFlatAmount.value) * 100 : 0
-      phase.bankLoan = phase.bankLoanPercent
     } else {
-      // Convert amounts to percentages
       phase.builderDemandAmount = builderDemand
+      phase.builderDemandPercent = totalFlatAmount.value > 0 ? (builderDemand / totalFlatAmount.value) * 100 : 0
+    }
+    
+    // Handle self contribution based on its input mode
+    if (phase.selfInputMode === 'percentage') {
+      phase.selfContributionAmount = (selfContribution / 100) * totalFlatAmount.value
+      phase.selfContributionPercent = selfContribution
+    } else {
       phase.selfContributionAmount = selfContribution
-      phase.bankLoanAmount = Math.max(0, phase.builderDemandAmount - phase.selfContributionAmount)
-      
-      // Update percentage fields
-      phase.builderDemandPercent = totalFlatAmount.value > 0 ? (phase.builderDemandAmount / totalFlatAmount.value) * 100 : 0
-      phase.selfContributionPercent = totalFlatAmount.value > 0 ? (phase.selfContributionAmount / totalFlatAmount.value) * 100 : 0
-      phase.bankLoanPercent = totalFlatAmount.value > 0 ? (phase.bankLoanAmount / totalFlatAmount.value) * 100 : 0
+      phase.selfContributionPercent = totalFlatAmount.value > 0 ? (selfContribution / totalFlatAmount.value) * 100 : 0
+    }
+    
+    // Bank loan is always the difference (builder demand - self contribution)
+    phase.bankLoanAmount = Math.max(0, phase.builderDemandAmount - phase.selfContributionAmount)
+    phase.bankLoanPercent = totalFlatAmount.value > 0 ? (phase.bankLoanAmount / totalFlatAmount.value) * 100 : 0
+    
+    // Update bank loan display value based on its input mode
+    if (phase.bankInputMode === 'percentage') {
+      phase.bankLoan = parseFloat(phase.bankLoanPercent.toFixed(1))
+    } else {
       phase.bankLoan = phase.bankLoanAmount
     }
     
@@ -382,8 +585,8 @@ const updatePhaseCalculations = (index) => {
     }
     
     // Validation: Check if phase month is within loan term
-    if (phase.month > loanTerm.value || phase.month < 1) {
-      console.warn(`Phase month ${phase.month} is outside valid range (1-${loanTerm.value})`)
+    if (phase.month > loanTerm.value || phase.month < 0) {
+      console.warn(`Phase month ${phase.month} is outside valid range (0-${loanTerm.value})`)
     }
     
   } catch (error) {
@@ -860,6 +1063,66 @@ const downloadCSV = () => {
     alert('Error creating CSV file. Please try again.')
   }
 }
+
+// Initialize all phase calculations on component mount
+onMounted(async () => {
+  console.log('Component mounted, disbursements:', disbursements.value)
+  
+  // Wait for DOM to be ready
+  await nextTick()
+  
+  console.log('About to force re-assignment of all phase data')
+  
+  // Create completely new objects to force Vue reactivity
+  const newDisbursements = disbursements.value.map((phase, index) => {
+    if (index === 0) {
+      // Phase 0 - Application money
+      return {
+        month: 0,
+        builderDemand: 0,
+        selfContribution: 500000,
+        bankLoan: 0,
+        builderDemandAmount: 0,
+        selfContributionAmount: 500000,
+        bankLoanAmount: 0,
+        builderDemandPercent: 0,
+        selfContributionPercent: 2.07,
+        bankLoanPercent: 0,
+        builderInputMode: 'amount',
+        selfInputMode: 'amount',
+        bankInputMode: 'amount'
+      }
+    } else {
+      // Other phases - explicitly set the correct values
+      const newPhase = {
+        ...phase,
+        // Ensure the display values are explicitly set
+        builderDemand: phase.builderDemand,
+        selfContribution: phase.selfContribution,
+        bankLoan: phase.bankLoan || 0
+      }
+      console.log(`Creating new phase ${index}:`, {
+        month: newPhase.month,
+        builderDemand: newPhase.builderDemand,
+        selfContribution: newPhase.selfContribution,
+        builderInputMode: newPhase.builderInputMode,
+        selfInputMode: newPhase.selfInputMode
+      })
+      return newPhase
+    }
+  })
+  
+  // Replace the entire array
+  disbursements.value = newDisbursements
+  
+  console.log('After re-assignment, disbursements:', disbursements.value)
+  
+  // Force calculations
+  await nextTick()
+  disbursements.value.forEach((_, index) => {
+    updatePhaseCalculations(index)
+  })
+})
 </script>
 
 <style scoped>
@@ -995,5 +1258,32 @@ const downloadCSV = () => {
 }
 .text-red-600 {
   color: #dc2626;
+}
+.text-blue-600 {
+  color: #2563eb;
+}
+.cumulative-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 0.5rem;
+  font-size: 0.875rem;
+}
+.border-t {
+  border-top-width: 1px;
+}
+.border-gray-300 {
+  border-color: #d1d5db;
+}
+.input-wide {
+  width: 120px;
+  flex: 1;
+  min-width: 100px;
+}
+.input-dropdown {
+  width: 45px;
+  min-width: 40px;
+  font-size: 0.75rem;
+  padding: 0.375rem 0.25rem;
+  text-align: center;
 }
 </style>
